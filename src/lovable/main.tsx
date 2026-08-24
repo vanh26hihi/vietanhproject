@@ -1,10 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import StudioV2 from "./StudioV2";
+import Studio from "./Studio";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <StudioV2 />
+    <Studio />
   </React.StrictMode>,
 );
