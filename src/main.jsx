@@ -1,560 +1,83 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import * as THREE from 'three';
-import { OrbitControls as ThreeOrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
-import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
-import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
-import { Brush, Evaluator, ADDITION, SUBTRACTION } from 'three-bvh-csg';
-import './styles.css';
+import React,{useEffect,useMemo,useRef,useState}from'react';
+import{createRoot}from'react-dom/client';
+import{Canvas,useFrame,useThree}from'@react-three/fiber';
+import*as THREE from'three';
+import{OrbitControls as ThreeOrbitControls}from'three/examples/jsm/controls/OrbitControls.js';
+import{STLExporter}from'three/examples/jsm/exporters/STLExporter.js';
+import{FontLoader}from'three/examples/jsm/loaders/FontLoader.js';
+import{TextGeometry}from'three/examples/jsm/geometries/TextGeometry.js';
+import{Brush,Evaluator,ADDITION,SUBTRACTION}from'three-bvh-csg';
+import'./styles.css';
 
-const profiles = {
-  Cherry: { h: 9.5, top: 13.2, dish: 0.65, tilt: -6 },
-  OEM: { h: 11.2, top: 13.5, dish: 0.75, tilt: -7 },
-  XDA: { h: 9.1, top: 14.2, dish: 0.35, tilt: 0 },
-  DSA: { h: 7.6, top: 14.0, dish: 0.45, tilt: 0 },
-  SA: { h: 13.5, top: 12.7, dish: 1.0, tilt: -8 },
-};
+const PROFILES={Cherry:{h:9.5,top:13.2,dish:.65,tilt:-6},OEM:{h:11.2,top:13.5,dish:.75,tilt:-7},XDA:{h:9.1,top:14.2,dish:.35,tilt:0},DSA:{h:7.6,top:14,dish:.45,tilt:0},SA:{h:13.5,top:12.7,dish:1,tilt:-8}};
+const SIZES={'1U':18,'1.25U':22.75,'1.5U':27.5,'1.75U':32.25,'2U':37,'2.25U':41.75,'2.75U':51.25,'6.25U':117.5};
+const FONTS={Sans:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/helvetiker_regular.typeface.json',Bold:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/helvetiker_bold.typeface.json',Serif:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/gentilis_regular.typeface.json',Mono:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/droid/droid_sans_mono_regular.typeface.json'};
+const evaluator=new Evaluator();evaluator.attributes=['position','normal'];
+const uid=()=>Math.random().toString(36).slice(2,9);
+const defaultLegend=(text='A')=>({id:uid(),text,mode:'Emboss',font:'Sans',size:4.2,depth:.55,bevel:.04,x:0,y:0,rotate:0});
 
-const sizes = {
-  '1U': 18,
-  '1.25U': 22.75,
-  '1.5U': 27.5,
-  '1.75U': 32.25,
-  '2U': 37,
-  '2.25U': 41.75,
-  '2.75U': 51.25,
-  '6.25U': 117.5,
-};
+function ring(w,d,r,z,segments=48){const pts=[],rr=Math.max(.05,Math.min(r,w/2-.02,d/2-.02)),pc=Math.max(3,Math.floor(segments/4)),cs=[[w/2-rr,d/2-rr,0,Math.PI/2],[-w/2+rr,d/2-rr,Math.PI/2,Math.PI],[-w/2+rr,-d/2+rr,Math.PI,Math.PI*1.5],[w/2-rr,-d/2+rr,Math.PI*1.5,Math.PI*2]];for(const[cx,cy,a0,a1]of cs)for(let i=0;i<pc;i++){const a=a0+(a1-a0)*i/pc;pts.push([cx+Math.cos(a)*rr,cy+Math.sin(a)*rr,z])}return pts}
+function loft(bw,bd,tw,td,h,corner,bottomZ=0){const levels=8,rings=[],pos=[],idx=[];for(let l=0;l<=levels;l++){const t=l/levels,w=THREE.MathUtils.lerp(bw,tw,t),d=THREE.MathUtils.lerp(bd,td,t),rr=ring(w,d,Math.min(corner,w*.22,d*.22),bottomZ+t*h),start=pos.length/3;rr.forEach(v=>pos.push(...v));rings.push({start,count:rr.length})}const n=rings[0].count;for(let l=0;l<levels;l++)for(let i=0;i<n;i++){const a=rings[l].start+i,b=rings[l].start+(i+1)%n,c=rings[l+1].start+(i+1)%n,d=rings[l+1].start+i;idx.push(a,b,c,a,c,d)}const tc=pos.length/3;pos.push(0,0,bottomZ+h);const top=rings.at(-1);for(let i=0;i<n;i++)idx.push(top.start+i,top.start+(i+1)%n,tc);const bc=pos.length/3;pos.push(0,0,bottomZ);const bot=rings[0];for(let i=0;i<n;i++)idx.push(bot.start+(i+1)%n,bot.start+i,bc);const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();return g}
+function brush(g){const b=new Brush(g);b.updateMatrixWorld(true);return b}
+function csg(a,b,op){a.updateMatrixWorld(true);b.updateMatrixWorld(true);const out=evaluator.evaluate(a,b,op);out.geometry.computeVertexNormals();return out}
+function unionBoxes(g1,g2){return csg(brush(g1),brush(g2),ADDITION)}
 
-const fontUrls = {
-  Sans: 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/helvetiker_regular.typeface.json',
-  Bold: 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/helvetiker_bold.typeface.json',
-  Serif: 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/gentilis_regular.typeface.json',
-  Mono: 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/droid/droid_sans_mono_regular.typeface.json',
-};
-
-const evaluator = new Evaluator();
-evaluator.attributes = ['position', 'normal'];
-
-function roundedRing(width, depth, radius, z, segments = 48) {
-  const points = [];
-  const r = Math.max(0.05, Math.min(radius, width / 2 - 0.02, depth / 2 - 0.02));
-  const perCorner = Math.max(3, Math.floor(segments / 4));
-  const corners = [
-    [width / 2 - r, depth / 2 - r, 0, Math.PI / 2],
-    [-width / 2 + r, depth / 2 - r, Math.PI / 2, Math.PI],
-    [-width / 2 + r, -depth / 2 + r, Math.PI, Math.PI * 1.5],
-    [width / 2 - r, -depth / 2 + r, Math.PI * 1.5, Math.PI * 2],
-  ];
-
-  for (const [cx, cy, a0, a1] of corners) {
-    for (let i = 0; i < perCorner; i += 1) {
-      const a = a0 + ((a1 - a0) * i) / perCorner;
-      points.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r, z]);
-    }
-  }
-  return points;
+function addMxSocket(result,p,x=0,y=0){
+ const insideTop=p.height-p.topThickness+.15,h=p.stemHousingHeight,bottom=insideTop-h;
+ const outer=p.stemHousingShape==='Round'?new THREE.CylinderGeometry(p.stemHousingDiameter/2,p.stemHousingDiameter/2,h,32):new THREE.BoxGeometry(p.stemHousingDiameter,p.stemHousingDiameter,h);
+ if(p.stemHousingShape==='Round')outer.rotateX(Math.PI/2);
+ outer.translate(x,y,bottom+h/2);result=csg(result,brush(outer),ADDITION);
+ const total=p.mxCrossTotal+p.stemTolerance,arm=p.mxArm+p.stemTolerance,depth=Math.min(p.stemSlotDepth,h+.4),zc=bottom+depth/2-.15;
+ const a=new THREE.BoxGeometry(total,arm,depth+.35),b=new THREE.BoxGeometry(arm,total,depth+.35);a.translate(x,y,zc);b.translate(x,y,zc);
+ result=csg(result,unionBoxes(a,b),SUBTRACTION);return result;
 }
-
-function loftGeometry(bottomW, bottomD, topW, topD, height, corner, bottomZ = 0) {
-  const levels = 8;
-  const rings = [];
-  const positions = [];
-  const indices = [];
-
-  for (let level = 0; level <= levels; level += 1) {
-    const t = level / levels;
-    const width = THREE.MathUtils.lerp(bottomW, topW, t);
-    const depth = THREE.MathUtils.lerp(bottomD, topD, t);
-    const ring = roundedRing(width, depth, Math.min(corner, width * 0.22, depth * 0.22), bottomZ + t * height);
-    const start = positions.length / 3;
-    for (const point of ring) positions.push(...point);
-    rings.push({ start, count: ring.length });
-  }
-
-  const count = rings[0].count;
-  for (let level = 0; level < levels; level += 1) {
-    for (let i = 0; i < count; i += 1) {
-      const a = rings[level].start + i;
-      const b = rings[level].start + ((i + 1) % count);
-      const c = rings[level + 1].start + ((i + 1) % count);
-      const d = rings[level + 1].start + i;
-      indices.push(a, b, c, a, c, d);
-    }
-  }
-
-  const topCenter = positions.length / 3;
-  positions.push(0, 0, bottomZ + height);
-  const top = rings[rings.length - 1];
-  for (let i = 0; i < count; i += 1) {
-    indices.push(top.start + i, top.start + ((i + 1) % count), topCenter);
-  }
-
-  const bottomCenter = positions.length / 3;
-  positions.push(0, 0, bottomZ);
-  const bottom = rings[0];
-  for (let i = 0; i < count; i += 1) {
-    indices.push(bottom.start + ((i + 1) % count), bottom.start + i, bottomCenter);
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  return geometry;
+function buildBody(p){
+ const s=1+p.shrinkage/100,xy=p.xyComp*2;
+ const q={...p,width:(p.width+xy)*s,depth:(p.depth+xy)*s,topWidth:(p.topWidth+xy)*s,topDepth:(p.topDepth+xy)*s,height:(p.height+p.zComp)*s};
+ let result=brush(loft(q.width,q.depth,q.topWidth,q.topDepth,q.height,q.corner,p.bottomZ||0));
+ const iw=Math.max(1,q.width-2*q.wall),id=Math.max(1,q.depth-2*q.wall),itw=Math.max(1,q.topWidth-2*q.wall),itd=Math.max(1,q.topDepth-2*q.wall),ch=Math.max(.5,q.height-q.topThickness+.65);
+ result=csg(result,brush(loft(iw,id,itw,itd,ch,Math.max(.2,q.corner-q.wall*.6),-.55)),SUBTRACTION);
+ if(q.dish>.01){const r=Math.max(18,Math.max(q.topWidth,q.topDepth)*2.6),sg=new THREE.SphereGeometry(r,48,24);sg.translate(0,0,q.height+r-q.dish);result=csg(result,brush(sg),SUBTRACTION)}
+ if(q.stemEnabled)result=addMxSocket(result,q,0,0);
+ if(q.stabilizers){const half=q.stabSpacing/2;result=addMxSocket(result,q,-half,0);result=addMxSocket(result,q,half,0)}
+ return{result,q};
 }
+function makeTextBrush(l,p,font){if(!font||!l.text.trim()||l.mode==='Off')return null;const d=l.mode==='Emboss'?l.depth+.28:l.depth+.45,g=new TextGeometry(l.text,{font,size:l.size,depth:d,curveSegments:5,bevelEnabled:l.bevel>0,bevelThickness:l.bevel,bevelSize:l.bevel,bevelSegments:2});g.computeBoundingBox();const b=g.boundingBox;g.translate(-(b.min.x+b.max.x)/2,-(b.min.y+b.max.y)/2,0);g.rotateZ(THREE.MathUtils.degToRad(l.rotate));const surface=p.height-Math.max(.04,p.dish*.82),z=l.mode==='Emboss'?surface-.22:surface-l.depth;g.translate(l.x,l.y,z);return brush(g)}
+function buildFinal(p,legends,fontMap){let{result,q}=buildBody(p);for(const l of legends){const t=makeTextBrush(l,q,fontMap[l.font]);if(t)result=csg(result,t,l.mode==='Emboss'?ADDITION:SUBTRACTION)}const g=result.geometry.clone();g.rotateX(-Math.PI/2);g.rotateZ(THREE.MathUtils.degToRad(q.tilt));g.computeVertexNormals();return g}
 
-function toBrush(geometry) {
-  const brush = new Brush(geometry);
-  brush.updateMatrixWorld(true);
-  return brush;
-}
+function Controls({view}){const{camera,gl}=useThree(),ref=useRef();useEffect(()=>{const c=new ThreeOrbitControls(camera,gl.domElement);c.target.set(0,3,0);c.enableDamping=true;ref.current=c;return()=>c.dispose()},[camera,gl]);useEffect(()=>{const m={Iso:[28,22,30],Top:[0,45,.01],Bottom:[0,-45,.01],Front:[0,6,45],Back:[0,6,-45],Left:[-45,6,0],Right:[45,6,0]},v=m[view]||m.Iso;camera.position.set(...v);camera.up.set(0,1,0);camera.lookAt(0,3,0);ref.current?.target.set(0,3,0);ref.current?.update()},[view,camera]);useFrame(()=>ref.current?.update());return null}
+function Scene({geometry,p,modelRef,view}){const mat=useMemo(()=>new THREE.MeshStandardMaterial({color:p.color,roughness:.38,metalness:.03,transparent:p.transparent,opacity:p.transparent?.55:1,wireframe:p.wireframe,side:THREE.DoubleSide}),[p.color,p.transparent,p.wireframe]);return <><ambientLight intensity={1.2}/><directionalLight position={[10,15,8]} intensity={2}/><mesh ref={modelRef} geometry={geometry} material={mat}/>{p.grid&&<gridHelper args={[160,160]}/>}<axesHelper args={[12]}/><Controls view={view}/></>}
+function Num({label,value,onChange,step=.1,suffix='mm'}){return <label className="field"><span>{label}</span><div><input type="number" value={value} step={step} onChange={e=>onChange(Number(e.target.value))}/><b>{suffix}</b></div></label>}
+function Sel({label,value,onChange,children}){return <label className="field"><span>{label}</span><select value={value} onChange={e=>onChange(e.target.value)}>{children}</select></label>}
+function Toggle({checked,onChange,children}){return <label className="toggle"><input type="checkbox" checked={checked} onChange={e=>onChange(e.target.checked)}/><span>{children}</span></label>}
 
-function csg(a, b, operation) {
-  a.updateMatrixWorld(true);
-  b.updateMatrixWorld(true);
-  const result = evaluator.evaluate(a, b, operation);
-  result.geometry.computeVertexNormals();
-  return result;
-}
-
-function buildBase(params) {
-  let result = toBrush(
-    loftGeometry(
-      params.width,
-      params.depth,
-      params.topWidth,
-      params.topDepth,
-      params.height,
-      params.corner,
-    ),
-  );
-
-  const innerW = Math.max(1, params.width - params.wall * 2);
-  const innerD = Math.max(1, params.depth - params.wall * 2);
-  const innerTopW = Math.max(1, params.topWidth - params.wall * 2);
-  const innerTopD = Math.max(1, params.topDepth - params.wall * 2);
-  const cavityHeight = Math.max(0.5, params.height - params.topThickness + 0.6);
-
-  const cavity = toBrush(
-    loftGeometry(
-      innerW,
-      innerD,
-      innerTopW,
-      innerTopD,
-      cavityHeight,
-      Math.max(0.2, params.corner - params.wall * 0.6),
-      -0.5,
-    ),
-  );
-  result = csg(result, cavity, SUBTRACTION);
-
-  if (params.dish > 0.01) {
-    const radius = Math.max(18, Math.max(params.topWidth, params.topDepth) * 2.6);
-    const dishGeometry = new THREE.SphereGeometry(radius, 48, 24);
-    dishGeometry.translate(0, 0, params.height + radius - params.dish);
-    result = csg(result, toBrush(dishGeometry), SUBTRACTION);
-  }
-
-  if (params.stemEnabled) {
-    const arm = Math.max(0.9, 1.15 + params.clearance);
-    const long = Math.max(3.7, 4.05 + params.clearance);
-    const stemTop = params.height - params.topThickness + 0.18;
-    const stemHeight = Math.min(params.stemHeight, Math.max(2.2, stemTop + 0.2));
-    const stemZ = stemTop - stemHeight / 2;
-
-    const horizontal = new THREE.BoxGeometry(long, arm, stemHeight);
-    horizontal.translate(0, 0, stemZ);
-    const vertical = new THREE.BoxGeometry(arm, long, stemHeight);
-    vertical.translate(0, 0, stemZ);
-    const stem = csg(toBrush(horizontal), toBrush(vertical), ADDITION);
-    result = csg(result, stem, ADDITION);
-  }
-
-  return result;
-}
-
-function buildTextBrush(params, font) {
-  if (!font || !params.text.trim() || params.textMode === 'Off') return null;
-
-  const depth = params.textMode === 'Emboss' ? params.textDepth + 0.28 : params.textDepth + 0.45;
-  const geometry = new TextGeometry(params.text, {
-    font,
-    size: params.textSize,
-    depth,
-    curveSegments: 5,
-    bevelEnabled: params.textBevel > 0,
-    bevelThickness: params.textBevel,
-    bevelSize: params.textBevel,
-    bevelSegments: 2,
-  });
-
-  geometry.computeBoundingBox();
-  const box = geometry.boundingBox;
-  geometry.translate(-(box.min.x + box.max.x) / 2, -(box.min.y + box.max.y) / 2, 0);
-  geometry.rotateZ(THREE.MathUtils.degToRad(params.textRotate));
-
-  const surfaceZ = params.height - Math.max(0.04, params.dish * 0.82);
-  const z = params.textMode === 'Emboss' ? surfaceZ - 0.22 : surfaceZ - params.textDepth;
-  geometry.translate(params.textX, params.textY, z);
-  return toBrush(geometry);
-}
-
-function buildFinalGeometry(params, font) {
-  let solid = buildBase(params);
-  const text = buildTextBrush(params, font);
-  if (text) solid = csg(solid, text, params.textMode === 'Emboss' ? ADDITION : SUBTRACTION);
-
-  const geometry = solid.geometry.clone();
-  geometry.rotateX(-Math.PI / 2);
-  geometry.rotateZ(THREE.MathUtils.degToRad(params.tilt));
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-function Controls() {
-  const { camera, gl } = useThree();
-  const controlsRef = useRef(null);
-
-  useEffect(() => {
-    const controls = new ThreeOrbitControls(camera, gl.domElement);
-    controls.target.set(0, 3, 0);
-    controls.enableDamping = true;
-    controlsRef.current = controls;
-    return () => controls.dispose();
-  }, [camera, gl]);
-
-  useFrame(() => controlsRef.current?.update());
-  return null;
-}
-
-function Model({ geometry, params, modelRef }) {
-  const material = useMemo(
-    () =>
-      new THREE.MeshStandardMaterial({
-        color: '#e8eef7',
-        roughness: 0.36,
-        metalness: 0.04,
-        transparent: params.transparent,
-        opacity: params.transparent ? 0.58 : 1,
-        wireframe: params.wireframe,
-        side: THREE.DoubleSide,
-      }),
-    [params.transparent, params.wireframe],
-  );
-
-  return <mesh ref={modelRef} geometry={geometry} material={material} />;
-}
-
-function Scene({ geometry, params, modelRef }) {
-  return (
-    <>
-      <ambientLight intensity={1.25} />
-      <directionalLight position={[8, 12, 8]} intensity={2} />
-      <Model geometry={geometry} params={params} modelRef={modelRef} />
-      <gridHelper args={[140, 140]} />
-      <Controls />
-    </>
-  );
-}
-
-function NumberField({ label, value, onChange, step = 0.1, suffix = 'mm' }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <div>
-        <input type="number" value={value} step={step} onChange={(e) => onChange(Number(e.target.value))} />
-        <b>{suffix}</b>
-      </div>
-    </label>
-  );
-}
-
-function SelectField({ label, value, onChange, children }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
-        {children}
-      </select>
-    </label>
-  );
-}
-
-function App() {
-  const modelRef = useRef(null);
-  const [size, setSize] = useState('1U');
-  const [profile, setProfile] = useState('Cherry');
-  const [font, setFont] = useState(null);
-  const [fontError, setFontError] = useState('');
-  const [params, setParams] = useState({
-    width: 18,
-    depth: 18,
-    topWidth: 13.2,
-    topDepth: 13.2,
-    height: 9.5,
-    wall: 1.2,
-    topThickness: 1.6,
-    corner: 1.7,
-    dish: 0.65,
-    tilt: -6,
-    clearance: 0.1,
-    stemEnabled: true,
-    stemHeight: 4.4,
-    text: 'A',
-    textMode: 'Emboss',
-    textFont: 'Sans',
-    textSize: 4.2,
-    textDepth: 0.55,
-    textBevel: 0.05,
-    textX: 0,
-    textY: 0,
-    textRotate: 0,
-    wireframe: false,
-    transparent: false,
-  });
-
-  const patch = (next) => setParams((current) => ({ ...current, ...next }));
-
-  useEffect(() => {
-    let cancelled = false;
-    setFont(null);
-    setFontError('');
-    fetch(fontUrls[params.textFont])
-      .then((response) => {
-        if (!response.ok) throw new Error('font');
-        return response.json();
-      })
-      .then((json) => {
-        if (!cancelled) setFont(new FontLoader().parse(json));
-      })
-      .catch(() => {
-        if (!cancelled) setFontError('Không tải được font. Hãy thử đổi font hoặc tải lại trang.');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [params.textFont]);
-
-  const geometry = useMemo(() => {
-    try {
-      return buildFinalGeometry(params, font);
-    } catch (error) {
-      console.error('Geometry error', error);
-      return new THREE.BoxGeometry(1, 1, 1);
-    }
-  }, [params, font]);
-
-  const bounds = useMemo(() => {
-    geometry.computeBoundingBox();
-    const box = geometry.boundingBox;
-    return box ? new THREE.Vector3().subVectors(box.max, box.min) : new THREE.Vector3();
-  }, [geometry]);
-
-  const warnings = [];
-  if (params.wall < 0.8) warnings.push('Wall dưới 0.8 mm khá mỏng cho nozzle 0.4.');
-  if (params.topThickness < 1.1) warnings.push('Top thickness dưới 1.1 mm có thể yếu.');
-  if (params.textMode === 'Deboss' && params.textDepth > params.topThickness - 0.35) {
-    warnings.push('Độ khắc chữ đang gần hoặc xuyên qua top thickness.');
-  }
-
-  const applySize = (name) => {
-    setSize(name);
-    patch({ width: sizes[name], depth: 18 });
-  };
-
-  const applyProfile = (name) => {
-    setProfile(name);
-    const preset = profiles[name];
-    patch({
-      height: preset.h,
-      topWidth: preset.top,
-      topDepth: preset.top,
-      dish: preset.dish,
-      tilt: preset.tilt,
-    });
-  };
-
-  const setTextPosition = (name) => {
-    const dx = params.topWidth * 0.28;
-    const dy = params.topDepth * 0.27;
-    const map = {
-      Center: [0, 0],
-      Top: [0, dy],
-      Bottom: [0, -dy],
-      Left: [-dx, 0],
-      Right: [dx, 0],
-      TL: [-dx, dy],
-      TR: [dx, dy],
-    };
-    const [x, y] = map[name];
-    patch({ textX: Number(x.toFixed(2)), textY: Number(y.toFixed(2)) });
-  };
-
-  const exportStl = () => {
-    if (!modelRef.current) return;
-    modelRef.current.updateMatrixWorld(true);
-    const data = new STLExporter().parse(modelRef.current, { binary: true });
-    const blob = new Blob([data], { type: 'model/stl' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `keycap_${size}_${profile}_${params.textMode}_${(params.text || 'blank').replace(/[^a-z0-9_-]/gi, '_')}.stl`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-  };
-
-  const exportJson = () => {
-    const blob = new Blob([JSON.stringify({ version: 2, size, profile, ...params }, null, 2)], {
-      type: 'application/json',
-    });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'keycap-settings.json';
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-  };
-
-  const importJson = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    file.text().then((text) => {
-      try {
-        const data = JSON.parse(text);
-        if (data.size) setSize(data.size);
-        if (data.profile) setProfile(data.profile);
-        const { version, size: ignoredSize, profile: ignoredProfile, ...rest } = data;
-        void version;
-        void ignoredSize;
-        void ignoredProfile;
-        patch(rest);
-      } catch {
-        alert('File JSON không hợp lệ.');
-      }
-    });
-    event.target.value = '';
-  };
-
-  return (
-    <div className="app">
-      <header>
-        <div>
-          <h1>Keycap Generator</h1>
-          <p>Keycap FDM — chữ nổi/khắc chìm được boolean trực tiếp vào STL</p>
-        </div>
-        <div className="actions">
-          <label className="filebtn">
-            Nhập JSON
-            <input type="file" accept="application/json" onChange={importJson} />
-          </label>
-          <button onClick={exportJson}>Xuất JSON</button>
-          <button className="primary" onClick={exportStl}>Xuất STL</button>
-        </div>
-      </header>
-
-      <main>
-        <aside>
-          <section>
-            <h3>Kích thước</h3>
-            <div className="chips">
-              {Object.keys(sizes).map((name) => (
-                <button key={name} className={size === name ? 'active' : ''} onClick={() => applySize(name)}>
-                  {name}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section>
-            <h3>Profile</h3>
-            <div className="chips">
-              {Object.keys(profiles).map((name) => (
-                <button key={name} className={profile === name ? 'active' : ''} onClick={() => applyProfile(name)}>
-                  {name}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section>
-            <h3>Hiển thị</h3>
-            <label className="toggle"><input type="checkbox" checked={params.wireframe} onChange={(e) => patch({ wireframe: e.target.checked })} />Wireframe</label>
-            <label className="toggle"><input type="checkbox" checked={params.transparent} onChange={(e) => patch({ transparent: e.target.checked })} />Vỏ trong suốt</label>
-          </section>
-
-          <section>
-            <h3>Phân tích</h3>
-            <div className="stats">
-              <span>X <b>{bounds.x.toFixed(2)} mm</b></span>
-              <span>Y <b>{bounds.y.toFixed(2)} mm</b></span>
-              <span>Z <b>{bounds.z.toFixed(2)} mm</b></span>
-            </div>
-            {warnings.map((warning) => <p className="warning" key={warning}>{warning}</p>)}
-            {warnings.length === 0 ? <p className="ok">Thông số hiện tại hợp lý cho FDM.</p> : null}
-          </section>
-        </aside>
-
-        <div className="viewer">
-          <Canvas camera={{ position: [28, 22, 30], fov: 36 }}>
-            <Scene geometry={geometry} params={params} modelRef={modelRef} />
-          </Canvas>
-          <div className="hint">Kéo để xoay • Lăn chuột để zoom • Grid = 1 mm</div>
-        </div>
-
-        <aside className="right">
-          <section>
-            <h3>Thân keycap</h3>
-            <NumberField label="Rộng đáy" value={params.width} onChange={(value) => patch({ width: value })} />
-            <NumberField label="Sâu đáy" value={params.depth} onChange={(value) => patch({ depth: value })} />
-            <NumberField label="Rộng mặt" value={params.topWidth} onChange={(value) => patch({ topWidth: value })} />
-            <NumberField label="Sâu mặt" value={params.topDepth} onChange={(value) => patch({ topDepth: value })} />
-            <NumberField label="Chiều cao" value={params.height} onChange={(value) => patch({ height: value })} />
-            <NumberField label="Wall" value={params.wall} onChange={(value) => patch({ wall: value })} />
-            <NumberField label="Top thickness" value={params.topThickness} onChange={(value) => patch({ topThickness: value })} />
-            <NumberField label="Bo góc" value={params.corner} onChange={(value) => patch({ corner: value })} />
-            <NumberField label="Dish" value={params.dish} onChange={(value) => patch({ dish: value })} />
-            <NumberField label="Tilt" value={params.tilt} onChange={(value) => patch({ tilt: value })} suffix="°" />
-          </section>
-
-          <section>
-            <h3>Stem Cherry MX</h3>
-            <label className="toggle"><input type="checkbox" checked={params.stemEnabled} onChange={(e) => patch({ stemEnabled: e.target.checked })} />Bật stem</label>
-            <NumberField label="Clearance" value={params.clearance} onChange={(value) => patch({ clearance: value })} step={0.05} />
-            <NumberField label="Chiều cao stem" value={params.stemHeight} onChange={(value) => patch({ stemHeight: value })} />
-            <small>FDM nozzle 0.4: nên test clearance +0.05 đến +0.15 mm.</small>
-          </section>
-
-          <section>
-            <h3>Chữ / Legend</h3>
-            <label className="field">
-              <span>Nội dung</span>
-              <input className="textinput" value={params.text} maxLength={14} onChange={(e) => patch({ text: e.target.value })} placeholder="ESC, A, Enter..." />
-            </label>
-            <SelectField label="Kiểu" value={params.textMode} onChange={(value) => patch({ textMode: value })}>
-              <option>Emboss</option><option>Deboss</option><option>Off</option>
-            </SelectField>
-            <SelectField label="Font" value={params.textFont} onChange={(value) => patch({ textFont: value })}>
-              {Object.keys(fontUrls).map((name) => <option key={name}>{name}</option>)}
-            </SelectField>
-            <NumberField label="Cỡ chữ" value={params.textSize} onChange={(value) => patch({ textSize: value })} />
-            <NumberField label="Độ nổi / khắc" value={params.textDepth} onChange={(value) => patch({ textDepth: value })} step={0.05} />
-            <NumberField label="Bevel chữ" value={params.textBevel} onChange={(value) => patch({ textBevel: value })} step={0.01} />
-            <NumberField label="Vị trí X" value={params.textX} onChange={(value) => patch({ textX: value })} />
-            <NumberField label="Vị trí Y" value={params.textY} onChange={(value) => patch({ textY: value })} />
-            <NumberField label="Xoay" value={params.textRotate} onChange={(value) => patch({ textRotate: value })} suffix="°" />
-            <div className="chips position">
-              {['Center', 'Top', 'Bottom', 'Left', 'Right', 'TL', 'TR'].map((name) => (
-                <button key={name} onClick={() => setTextPosition(name)}>{name}</button>
-              ))}
-            </div>
-            {fontError ? <p className="warning">{fontError}</p> : null}
-            <p className="note"><b>Emboss</b> = chữ nổi liền mesh. <b>Deboss</b> = khắc chìm thật bằng CSG. STL xuất ra dùng đúng geometry đang preview.</p>
-          </section>
-        </aside>
-      </main>
-    </div>
-  );
-}
-
-createRoot(document.getElementById('root')).render(<App />);
+function App(){
+ const modelRef=useRef(),[size,setSize]=useState('1U'),[profile,setProfile]=useState('Cherry'),[view,setView]=useState('Iso'),[tab,setTab]=useState('Shape'),[fonts,setFonts]=useState({}),[legends,setLegends]=useState([defaultLegend('A')]);
+ const[p,setP]=useState({width:18,depth:18,topWidth:13.2,topDepth:13.2,height:9.5,wall:1.2,topThickness:1.6,corner:1.7,dish:.65,tilt:-6,color:'#e9eef7',stemEnabled:true,stemHousingShape:'Round',stemHousingDiameter:5.8,stemHousingHeight:5.4,mxCrossTotal:4.10,mxArm:1.17,stemTolerance:.10,stemSlotDepth:4.2,stabilizers:false,stabSpacing:23.8,nozzle:.4,xyComp:0,zComp:0,shrinkage:0,wireframe:false,transparent:false,grid:true});
+ const patch=x=>setP(v=>({...v,...x}));
+ useEffect(()=>{Promise.all(Object.entries(FONTS).map(async([k,u])=>{const r=await fetch(u);return[k,new FontLoader().parse(await r.json())]})).then(a=>setFonts(Object.fromEntries(a))).catch(console.error)},[]);
+ const geometry=useMemo(()=>{try{return buildFinal(p,legends,fonts)}catch(e){console.error('CSG',e);return new THREE.BoxGeometry(1,1,1)}},[p,legends,fonts]);
+ const bounds=useMemo(()=>{geometry.computeBoundingBox();const b=geometry.boundingBox;return b?new THREE.Vector3().subVectors(b.max,b.min):new THREE.Vector3()},[geometry]);
+ const applyProfile=n=>{setProfile(n);const q=PROFILES[n];patch({height:q.h,topWidth:q.top,topDepth:q.top,dish:q.dish,tilt:q.tilt})};
+ const applySize=n=>{setSize(n);const w=SIZES[n],st=n==='6.25U'?100.5:['2U','2.25U','2.75U'].includes(n)?23.8:p.stabSpacing;patch({width:w,depth:18,stabilizers:['2U','2.25U','2.75U','6.25U'].includes(n),stabSpacing:st})};
+ const setFdm=n=>patch({nozzle:n,wall:n===.2?1:n===.4?1.2:1.8,topThickness:n===.2?1.2:n===.4?1.6:2.1,stemTolerance:n===.2?.05:n===.4?.10:.16});
+ const updLeg=(id,x)=>setLegends(v=>v.map(l=>l.id===id?{...l,...x}:l));
+ const addLegend=()=>legends.length<8&&setLegends(v=>[...v,defaultLegend(`L${v.length+1}`)]);
+ const delLegend=id=>setLegends(v=>v.filter(l=>l.id!==id));
+ const posLegend=(id,name)=>{const dx=p.topWidth*.28,dy=p.topDepth*.27,m={Center:[0,0],Top:[0,dy],Bottom:[0,-dy],Left:[-dx,0],Right:[dx,0],TL:[-dx,dy],TR:[dx,dy],BL:[-dx,-dy],BR:[dx,-dy]},[x,y]=m[name];updLeg(id,{x:+x.toFixed(2),y:+y.toFixed(2)})};
+ const warnings=[];if(p.wall<Math.max(.8,p.nozzle*2))warnings.push('Wall hơi mỏng so với nozzle đang chọn.');if(p.stemHousingDiameter-p.mxCrossTotal<1.2)warnings.push('Housing stem quá mỏng quanh khe MX.');if(p.stemSlotDepth>p.stemHousingHeight+.1)warnings.push('Stem slot sâu hơn housing.');if(legends.some(l=>l.mode==='Deboss'&&l.depth>p.topThickness-.3))warnings.push('Có legend khắc quá sâu so với top thickness.');
+ const download=(blob,name)=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1200)};
+ const exportStl=()=>{if(!modelRef.current)return;modelRef.current.updateMatrixWorld(true);download(new Blob([new STLExporter().parse(modelRef.current,{binary:true})],{type:'model/stl'}),`keycap_${size}_${profile}_${legends.map(x=>x.text).join('-')||'blank'}.stl`)};
+ const exportJson=()=>download(new Blob([JSON.stringify({version:2,size,profile,p,legends},null,2)],{type:'application/json'}),'keycap-project.json');
+ const importJson=e=>{const f=e.target.files?.[0];if(!f)return;f.text().then(t=>{try{const q=JSON.parse(t);q.size&&setSize(q.size);q.profile&&setProfile(q.profile);q.p&&setP(q.p);q.legends&&setLegends(q.legends.map(x=>({...x,id:x.id||uid()})))}catch{alert('JSON không hợp lệ')}});e.target.value=''};
+ const tabs=['Shape','Stem','Legends','Print','View'];
+ return <div className="app"><header><div className="brand"><div className="logo">K</div><div><h1>Keycap Studio</h1><p>Parametric keycap generator · MX socket · Multi legend</p></div></div><div className="actions"><label className="filebtn">Import JSON<input type="file" accept="application/json" onChange={importJson}/></label><button onClick={exportJson}>Save JSON</button><button className="primary" onClick={exportStl}>Export STL</button></div></header>
+ <div className="workspace"><aside className="left"><div className="tabbar">{tabs.map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</div>
+ {tab==='Shape'&&<><section><h3>Key size</h3><div className="chips">{Object.keys(SIZES).map(n=><button key={n} className={size===n?'active':''} onClick={()=>applySize(n)}>{n}</button>)}</div></section><section><h3>Profile</h3><div className="chips">{Object.keys(PROFILES).map(n=><button key={n} className={profile===n?'active':''} onClick={()=>applyProfile(n)}>{n}</button>)}</div></section><section><h3>Body geometry</h3><Num label="Bottom width" value={p.width} onChange={v=>patch({width:v})}/><Num label="Bottom depth" value={p.depth} onChange={v=>patch({depth:v})}/><Num label="Top width" value={p.topWidth} onChange={v=>patch({topWidth:v})}/><Num label="Top depth" value={p.topDepth} onChange={v=>patch({topDepth:v})}/><Num label="Height" value={p.height} onChange={v=>patch({height:v})}/><Num label="Wall" value={p.wall} onChange={v=>patch({wall:v})}/><Num label="Top thickness" value={p.topThickness} onChange={v=>patch({topThickness:v})}/><Num label="Corner radius" value={p.corner} onChange={v=>patch({corner:v})}/><Num label="Dish depth" value={p.dish} onChange={v=>patch({dish:v})}/><Num label="Top tilt" value={p.tilt} onChange={v=>patch({tilt:v})} suffix="°"/></section></>}
+ {tab==='Stem'&&<><section className="accent"><h3>Cherry MX female socket</h3><p className="desc">Khe chữ thập được khoét khỏi housing, không phải dấu + đặc.</p><Toggle checked={p.stemEnabled} onChange={v=>patch({stemEnabled:v})}>Center MX socket</Toggle><Sel label="Housing" value={p.stemHousingShape} onChange={v=>patch({stemHousingShape:v})}><option>Round</option><option>Square</option></Sel><Num label="Housing diameter" value={p.stemHousingDiameter} onChange={v=>patch({stemHousingDiameter:v})}/><Num label="Housing height" value={p.stemHousingHeight} onChange={v=>patch({stemHousingHeight:v})}/><Num label="Cross total" value={p.mxCrossTotal} onChange={v=>patch({mxCrossTotal:v})} step={.01}/><Num label="Arm width" value={p.mxArm} onChange={v=>patch({mxArm:v})} step={.01}/><Num label="FDM tolerance" value={p.stemTolerance} onChange={v=>patch({stemTolerance:v})} step={.01}/><Num label="Socket depth" value={p.stemSlotDepth} onChange={v=>patch({stemSlotDepth:v})}/><div className="spec">Nominal keycap slot: 4.10 × 1.17 mm. Tolerance is added to both.</div></section><section><h3>Stabilizer sockets</h3><Toggle checked={p.stabilizers} onChange={v=>patch({stabilizers:v})}>Enable left/right sockets</Toggle><div className="chips"><button onClick={()=>patch({stabSpacing:23.8,stabilizers:true})}>2U · 23.8</button><button onClick={()=>patch({stabSpacing:100.5,stabilizers:true})}>6.25U · 100.5</button></div><Num label="Center spacing" value={p.stabSpacing} onChange={v=>patch({stabSpacing:v})}/></section></>}
+ {tab==='Legends'&&<><section><div className="sectionhead"><div><h3>Legends</h3><p className="desc">Tối đa 8 text độc lập trên một keycap.</p></div><button className="smallprimary" onClick={addLegend}>+ Add</button></div></section>{legends.map((l,i)=><section className="legendcard" key={l.id}><div className="legendtop"><b>Legend {i+1}</b><button className="danger" onClick={()=>delLegend(l.id)}>×</button></div><label className="field"><span>Text</span><input className="solo" value={l.text} maxLength={16} onChange={e=>updLeg(l.id,{text:e.target.value})}/></label><div className="twocol"><Sel label="Mode" value={l.mode} onChange={v=>updLeg(l.id,{mode:v})}><option>Emboss</option><option>Deboss</option><option>Off</option></Sel><Sel label="Font" value={l.font} onChange={v=>updLeg(l.id,{font:v})}>{Object.keys(FONTS).map(f=><option key={f}>{f}</option>)}</Sel></div><div className="twocol"><Num label="Size" value={l.size} onChange={v=>updLeg(l.id,{size:v})}/><Num label="Depth" value={l.depth} onChange={v=>updLeg(l.id,{depth:v})}/></div><div className="twocol"><Num label="X" value={l.x} onChange={v=>updLeg(l.id,{x:v})}/><Num label="Y" value={l.y} onChange={v=>updLeg(l.id,{y:v})}/></div><div className="twocol"><Num label="Rotate" value={l.rotate} onChange={v=>updLeg(l.id,{rotate:v})} suffix="°"/><Num label="Bevel" value={l.bevel} onChange={v=>updLeg(l.id,{bevel:v})} step={.01}/></div><div className="positiongrid">{['TL','Top','TR','Left','Center','Right','BL','Bottom','BR'].map(n=><button key={n} onClick={()=>posLegend(l.id,n)}>{n}</button>)}</div></section>)}</>}
+ {tab==='Print'&&<><section><h3>FDM presets</h3><div className="cards3">{[.2,.4,.6].map(n=><button key={n} className={p.nozzle===n?'selected':''} onClick={()=>setFdm(n)}><b>{n} mm</b><span>Nozzle</span></button>)}</div></section><section><h3>Compensation</h3><Num label="XY compensation" value={p.xyComp} onChange={v=>patch({xyComp:v})} step={.01}/><Num label="Z compensation" value={p.zComp} onChange={v=>patch({zComp:v})} step={.01}/><Num label="Shrinkage" value={p.shrinkage} onChange={v=>patch({shrinkage:v})} step={.05} suffix="%"/></section><section><h3>Validation</h3>{warnings.length?warnings.map((w,i)=><p className="warning" key={i}>⚠ {w}</p>):<p className="ok">✓ Parameters look printable.</p>}</section></>}
+ {tab==='View'&&<><section><h3>Camera</h3><div className="viewgrid">{['Iso','Top','Bottom','Front','Back','Left','Right'].map(v=><button key={v} className={view===v?'active':''} onClick={()=>setView(v)}>{v}</button>)}</div></section><section><h3>Display</h3><Toggle checked={p.grid} onChange={v=>patch({grid:v})}>1 mm grid</Toggle><Toggle checked={p.wireframe} onChange={v=>patch({wireframe:v})}>Wireframe</Toggle><Toggle checked={p.transparent} onChange={v=>patch({transparent:v})}>Transparent shell</Toggle><label className="field"><span>Material color</span><input type="color" className="color" value={p.color} onChange={e=>patch({color:e.target.value})}/></label></section><section><h3>Bounding box</h3><div className="stats"><span>X <b>{bounds.x.toFixed(2)} mm</b></span><span>Y <b>{bounds.y.toFixed(2)} mm</b></span><span>Z <b>{bounds.z.toFixed(2)} mm</b></span></div></section></>}
+ </aside><main className="viewer"><Canvas camera={{position:[28,22,30],fov:36}}><Scene geometry={geometry} p={p} modelRef={modelRef} view={view}/></Canvas><div className="floating"><span className="dot"></span>{size} · {profile} · {legends.filter(l=>l.mode!=='Off').length} legends</div><div className="hint">Drag rotate · Scroll zoom · Right-click pan</div></main>
+ <aside className="inspector"><section><h3>Live analysis</h3><div className="metric"><span>Dimensions</span><b>{bounds.x.toFixed(1)} × {bounds.z.toFixed(1)} × {bounds.y.toFixed(1)} mm</b></div><div className="metric"><span>MX socket</span><b>{(p.mxCrossTotal+p.stemTolerance).toFixed(2)} × {(p.mxArm+p.stemTolerance).toFixed(2)}</b></div><div className="metric"><span>Legends</span><b>{legends.length}</b></div><div className="metric"><span>Nozzle preset</span><b>{p.nozzle} mm</b></div></section><section className="tip"><h3>Stem test first</h3><p>Với FDM, hãy in một test stem nhỏ trước. Bắt đầu tolerance +0.10 mm cho nozzle 0.4, rồi tăng/giảm 0.05 mm theo máy và vật liệu.</p></section><section><h3>Quick actions</h3><button className="wide primary" onClick={exportStl}>Export current STL</button><button className="wide" onClick={()=>{setLegends([defaultLegend('A')]);setView('Iso')}}>Reset legends</button></section></aside></div></div>}
+createRoot(document.getElementById('root')).render(<App/>);
