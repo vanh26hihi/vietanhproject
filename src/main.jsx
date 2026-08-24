@@ -1,363 +1,86 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import * as THREE from 'three';
-import { OrbitControls as ThreeOrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
-import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
-import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { Brush, Evaluator, ADDITION, SUBTRACTION } from 'three-bvh-csg';
-import './styles.css';
+import React,{useEffect,useMemo,useRef,useState}from'react';
+import{createRoot}from'react-dom/client';
+import{Canvas,useFrame,useThree}from'@react-three/fiber';
+import*as THREE from'three';
+import{OrbitControls as ThreeOrbitControls}from'three/examples/jsm/controls/OrbitControls.js';
+import{STLExporter}from'three/examples/jsm/exporters/STLExporter.js';
+import{RoundedBoxGeometry}from'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import{Brush,Evaluator,ADDITION,SUBTRACTION}from'three-bvh-csg';
+import'./styles.css';
 
-const profiles = {
-  Cherry: { h: 9.5, top: 13.2, dish: 0.65, tilt: -6 },
-  OEM: { h: 11.2, top: 13.5, dish: 0.75, tilt: -7 },
-  XDA: { h: 9.1, top: 14.2, dish: 0.35, tilt: 0 },
-  DSA: { h: 7.6, top: 14.0, dish: 0.45, tilt: 0 },
-  SA: { h: 13.5, top: 12.7, dish: 1.0, tilt: -8 },
+const evaluator=new Evaluator();evaluator.attributes=['position','normal'];
+const units={
+'1U':{w:19.40,d:19.40},'1.25U':{w:24.15,d:19.40},'1.5U':{w:28.90,d:19.40},'1.75U':{w:33.65,d:19.40},'2U':{w:38.40,d:19.40},'2.25U':{w:43.15,d:19.40},'2.75U':{w:52.70,d:19.40},'6.25U':{w:119.20,d:19.40}
 };
-const sizes = { '1U': 18, '1.25U': 22.75, '1.5U': 27.5, '1.75U': 32.25, '2U': 37, '2.25U': 41.75, '2.75U': 51.25, '6.25U': 117.5 };
-const fontUrls = {
-  Sans: 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/helvetiker_regular.typeface.json',
-  Bold: 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/helvetiker_bold.typeface.json',
-  Serif: 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/gentilis_regular.typeface.json',
-  Mono: 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/fonts/droid/droid_sans_mono_regular.typeface.json',
-};
-const evaluator = new Evaluator();
-evaluator.attributes = ['position', 'normal'];
+const fitPreset={Tight:-0.15,Normal:0,Loose:0.20};
+const keyProfiles={Cherry:{height:9.5,top:13.2,dish:.65,tilt:-6},OEM:{height:11.2,top:13.5,dish:.75,tilt:-7},XDA:{height:9.1,top:14.2,dish:.35,tilt:0},DSA:{height:7.6,top:14,dish:.45,tilt:0},SA:{height:13.5,top:12.7,dish:1,tilt:-8}};
 
-function brush(geometry) {
-  const b = new Brush(geometry);
-  b.updateMatrixWorld(true);
-  return b;
-}
-function csg(a, b, op) {
-  a.updateMatrixWorld(true);
-  b.updateMatrixWorld(true);
-  const out = evaluator.evaluate(a, b, op);
-  out.geometry.computeVertexNormals();
-  return out;
-}
-function roundedRing(w, d, r, z, segments = 48) {
-  const pts = [];
-  const rr = Math.max(0.05, Math.min(r, w / 2 - 0.02, d / 2 - 0.02));
-  const perCorner = Math.max(3, Math.floor(segments / 4));
-  const corners = [
-    [w / 2 - rr, d / 2 - rr, 0, Math.PI / 2],
-    [-w / 2 + rr, d / 2 - rr, Math.PI / 2, Math.PI],
-    [-w / 2 + rr, -d / 2 + rr, Math.PI, Math.PI * 1.5],
-    [w / 2 - rr, -d / 2 + rr, Math.PI * 1.5, Math.PI * 2],
-  ];
-  for (const [cx, cy, a0, a1] of corners) {
-    for (let i = 0; i < perCorner; i++) {
-      const a = a0 + ((a1 - a0) * i) / perCorner;
-      pts.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, z]);
-    }
-  }
-  return pts;
-}
-function loftGeometry(bw, bd, tw, td, h, corner, bottomZ = 0) {
-  const levels = 8;
-  const rings = [];
-  const pos = [];
-  const idx = [];
-  for (let level = 0; level <= levels; level++) {
-    const t = level / levels;
-    const w = THREE.MathUtils.lerp(bw, tw, t);
-    const d = THREE.MathUtils.lerp(bd, td, t);
-    const ring = roundedRing(w, d, Math.min(corner, w * 0.22, d * 0.22), bottomZ + t * h);
-    const start = pos.length / 3;
-    for (const p of ring) pos.push(...p);
-    rings.push({ start, count: ring.length });
-  }
-  const count = rings[0].count;
-  for (let level = 0; level < levels; level++) {
-    for (let i = 0; i < count; i++) {
-      const a = rings[level].start + i;
-      const b = rings[level].start + ((i + 1) % count);
-      const cc = rings[level + 1].start + ((i + 1) % count);
-      const d = rings[level + 1].start + i;
-      idx.push(a, b, cc, a, cc, d);
-    }
-  }
-  const topCenter = pos.length / 3;
-  pos.push(0, 0, bottomZ + h);
-  const top = rings[rings.length - 1];
-  for (let i = 0; i < count; i++) idx.push(top.start + i, top.start + ((i + 1) % count), topCenter);
-  const bottomCenter = pos.length / 3;
-  pos.push(0, 0, bottomZ);
-  const bottom = rings[0];
-  for (let i = 0; i < count; i++) idx.push(bottom.start + ((i + 1) % count), bottom.start + i, bottomCenter);
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
-}
+function brush(g){const b=new Brush(g);b.updateMatrixWorld(true);return b}
+function csg(a,b,op){a.updateMatrixWorld(true);b.updateMatrixWorld(true);const out=evaluator.evaluate(a,b,op);out.geometry.computeVertexNormals();return out}
+function roundedBox(w,d,h,r=2){const g=new RoundedBoxGeometry(w,h,d,4,Math.max(.2,Math.min(r,w/2-.05,d/2-.05,h/2-.05)));g.rotateX(Math.PI/2);return g}
+function frustumBox(bottomW,bottomD,topW,topD,h){const z0=0,z1=h,verts=[[-bottomW/2,-bottomD/2,z0],[bottomW/2,-bottomD/2,z0],[bottomW/2,bottomD/2,z0],[-bottomW/2,bottomD/2,z0],[-topW/2,-topD/2,z1],[topW/2,-topD/2,z1],[topW/2,topD/2,z1],[-topW/2,topD/2,z1]],pos=verts.flat(),idx=[0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7];const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();return g}
+function crossPeg(total,arm,height,x,y,z){const g1=new THREE.BoxGeometry(total,arm,height),g2=new THREE.BoxGeometry(arm,total,height);g1.translate(x,y,z+height/2);g2.translate(x,y,z+height/2);return csg(brush(g1),brush(g2),ADDITION)}
 
-function makeSocket(p, x = 0, y = 0) {
-  const outer = new THREE.CylinderGeometry(p.socketOuter / 2, p.socketOuter / 2, p.socketHeight, 28);
-  outer.rotateX(Math.PI / 2);
-  outer.translate(x, y, p.socketHeight / 2 + p.socketBaseZ);
-  let socket = brush(outer);
-  const total = p.crossTotal + p.stemTolerance * 2;
-  const arm = p.crossArm + p.stemTolerance * 2;
-  const depth = p.socketHeight + 1;
-  const g1 = new THREE.BoxGeometry(total, arm, depth);
-  const g2 = new THREE.BoxGeometry(arm, total, depth);
-  g1.translate(x, y, p.socketHeight / 2 + p.socketBaseZ);
-  g2.translate(x, y, p.socketHeight / 2 + p.socketBaseZ);
-  const cross = csg(brush(g1), brush(g2), ADDITION);
-  socket = csg(socket, cross, SUBTRACTION);
-  return socket;
-}
-function buildKeycapBase(p) {
-  const outer = brush(loftGeometry(p.width, p.depth, p.topWidth, p.topDepth, p.height, p.corner));
-  const iw = Math.max(1, p.width - 2 * p.wall);
-  const id = Math.max(1, p.depth - 2 * p.wall);
-  const itw = Math.max(1, p.topWidth - 2 * p.wall);
-  const itd = Math.max(1, p.topDepth - 2 * p.wall);
-  const cavityH = Math.max(0.5, p.height - p.topThickness + 0.6);
-  let result = csg(outer, brush(loftGeometry(iw, id, itw, itd, cavityH, Math.max(0.2, p.corner - p.wall * 0.6), -0.5)), SUBTRACTION);
-  if (p.dish > 0.01) {
-    const radius = Math.max(18, Math.max(p.topWidth, p.topDepth) * 2.6);
-    const sphere = new THREE.SphereGeometry(radius, 48, 24);
-    sphere.translate(0, 0, p.height + radius - p.dish);
-    result = csg(result, brush(sphere), SUBTRACTION);
-  }
-  if (p.stemEnabled) result = csg(result, makeSocket(p), ADDITION);
-  if (p.stabilizers && p.width >= 36) {
-    const half = p.stabSpacing / 2;
-    result = csg(result, makeSocket(p, -half, 0), ADDITION);
-    result = csg(result, makeSocket(p, half, 0), ADDITION);
-  }
-  return result;
-}
-function legendBrush(legend, p, font) {
-  if (!font || !legend.text.trim() || legend.mode === 'Off') return null;
-  const depth = legend.mode === 'Emboss' ? legend.depth + 0.28 : legend.depth + 0.45;
-  const g = new TextGeometry(legend.text, {
-    font,
-    size: legend.size,
-    depth,
-    curveSegments: 5,
-    bevelEnabled: legend.bevel > 0,
-    bevelThickness: legend.bevel,
-    bevelSize: legend.bevel,
-    bevelSegments: 2,
+function buildTray(t){
+ const enabled=t.cells.filter(c=>c.enabled);const maxOpenW=Math.max(...enabled.map(c=>(units[c.unit]?.w||c.customW)+t.globalClearance*2+c.fitOffset),19.4);const maxOpenD=Math.max(...enabled.map(c=>(units[c.unit]?.d||c.customD)+t.globalClearance*2+c.fitOffset),19.4);
+ const W=(t.cols-1)*t.pitchX+maxOpenW+t.edge*2,D=(t.rows-1)*t.pitchY+maxOpenD+t.edge*2;
+ if(t.mode==='Pocket'){
+  const H=t.baseThickness+t.pocketDepth+t.topLip;const outer=roundedBox(W,D,H,t.outerRadius);outer.translate(0,0,H/2);let solid=brush(outer);
+  t.cells.forEach((cell,i)=>{if(!cell.enabled)return;const r=Math.floor(i/t.cols),c=i%t.cols,x=(c-(t.cols-1)/2)*t.pitchX,y=((t.rows-1)/2-r)*t.pitchY,base=units[cell.unit]||{w:cell.customW,d:cell.customD},openW=base.w+t.globalClearance*2+cell.fitOffset,openD=base.d+t.globalClearance*2+cell.fitOffset,bottomW=Math.max(4,openW-t.taperDelta),bottomD=Math.max(4,openD-t.taperDelta),pocketH=t.pocketDepth+t.topLip+.8;const p=frustumBox(bottomW,bottomD,openW,openD,pocketH);p.translate(x,y,t.baseThickness-.15);solid=csg(solid,brush(p),SUBTRACTION);
+    if(t.fingerNotch){const n=new THREE.CylinderGeometry(t.notchRadius,t.notchRadius,t.pocketDepth+2,32);n.rotateX(Math.PI/2);n.translate(x,y-openD/2+t.notchRadius*.45,t.baseThickness+t.pocketDepth*.55);solid=csg(solid,brush(n),SUBTRACTION)}
   });
-  g.computeBoundingBox();
-  const box = g.boundingBox;
-  g.translate(-(box.min.x + box.max.x) / 2, -(box.min.y + box.max.y) / 2, 0);
-  g.rotateZ(THREE.MathUtils.degToRad(legend.rotate));
-  const surface = p.height - Math.max(0.04, p.dish * 0.82);
-  const z = legend.mode === 'Emboss' ? surface - 0.22 : surface - legend.depth;
-  g.translate(legend.x, legend.y, z);
-  return brush(g);
-}
-function buildKeycapGeometry(p, legends, fonts) {
-  let solid = buildKeycapBase(p);
-  for (const legend of legends) {
-    const txt = legendBrush(legend, p, fonts[legend.font]);
-    if (txt) solid = csg(solid, txt, legend.mode === 'Emboss' ? ADDITION : SUBTRACTION);
-  }
-  const g = solid.geometry.clone();
-  g.rotateX(-Math.PI / 2);
-  g.rotateZ(THREE.MathUtils.degToRad(p.tilt));
-  g.computeVertexNormals();
-  return g;
+  const g=solid.geometry.clone();g.rotateX(-Math.PI/2);g.computeVertexNormals();return{geometry:g,W,D,H};
+ }
+ const H=t.mountPlate+t.pegHeight;const plate=roundedBox(W,D,t.mountPlate,t.outerRadius);plate.translate(0,0,t.mountPlate/2);let solid=brush(plate);
+ t.cells.forEach((cell,i)=>{if(!cell.enabled)return;const r=Math.floor(i/t.cols),c=i%t.cols,x=(c-(t.cols-1)/2)*t.pitchX,y=((t.rows-1)/2-r)*t.pitchY,fit=cell.fitOffset,pegTotal=Math.max(3.6,t.pegTotal+fit),pegArm=Math.max(.85,t.pegArm+fit*.45);solid=csg(solid,crossPeg(pegTotal,pegArm,t.pegHeight,x,y,t.mountPlate-.05),ADDITION);if(t.supportRing){const ringOuter=new THREE.CylinderGeometry(t.ringOuter/2,t.ringOuter/2,t.ringHeight,36),ringInner=new THREE.CylinderGeometry(t.ringInner/2,t.ringInner/2,t.ringHeight+1,36);ringOuter.rotateX(Math.PI/2);ringInner.rotateX(Math.PI/2);ringOuter.translate(x,y,t.mountPlate+t.ringHeight/2);ringInner.translate(x,y,t.mountPlate+t.ringHeight/2);solid=csg(solid,csg(brush(ringOuter),brush(ringInner),SUBTRACTION),ADDITION)}});
+ const g=solid.geometry.clone();g.rotateX(-Math.PI/2);g.computeVertexNormals();return{geometry:g,W,D,H};
 }
 
-function roundedBox(w, d, h, r = 2, segments = 3) {
-  const g = new RoundedBoxGeometry(w, h, d, segments, Math.min(r, w / 2 - 0.01, d / 2 - 0.01, h / 2 - 0.01));
-  g.rotateX(Math.PI / 2);
-  return g;
-}
-function buildTrayGeometry(t) {
-  const slotW = t.slotWidth + t.clearance * 2;
-  const slotD = t.slotDepth + t.clearance * 2;
-  const overallW = (t.cols - 1) * t.pitchX + slotW + t.edge * 2;
-  const overallD = (t.rows - 1) * t.pitchY + slotD + t.edge * 2;
-  const overallH = t.baseThickness + t.pocketDepth + t.topLip;
-  const outerG = roundedBox(overallW, overallD, overallH, t.outerRadius, 4);
-  outerG.translate(0, 0, overallH / 2);
-  let solid = brush(outerG);
-  const pocketH = t.pocketDepth + t.topLip + 0.7;
-  for (let row = 0; row < t.rows; row++) {
-    for (let col = 0; col < t.cols; col++) {
-      const idx = row * t.cols + col;
-      if (!t.cells[idx]) continue;
-      const x = (col - (t.cols - 1) / 2) * t.pitchX;
-      const y = ((t.rows - 1) / 2 - row) * t.pitchY;
-      const pocket = roundedBox(slotW, slotD, pocketH, t.slotRadius, 3);
-      pocket.translate(x, y, t.baseThickness + pocketH / 2 - 0.15);
-      solid = csg(solid, brush(pocket), SUBTRACTION);
-      if (t.fingerNotch) {
-        const notch = new THREE.CylinderGeometry(t.notchRadius, t.notchRadius, t.notchDepth + 1, 28);
-        notch.rotateX(Math.PI / 2);
-        notch.translate(x, y - slotD / 2 + t.notchRadius * 0.35, t.baseThickness + t.pocketDepth - t.notchDepth / 2 + 0.4);
-        solid = csg(solid, brush(notch), SUBTRACTION);
-      }
-    }
-  }
-  if (t.wallCutout) {
-    const cutW = overallW - t.edge * 2;
-    const cutD = overallD - t.edge * 2;
-    const g = roundedBox(cutW, cutD, t.baseThickness - 0.7, Math.max(0.5, t.outerRadius - 1), 3);
-    g.translate(0, 0, (t.baseThickness - 0.7) / 2 + 0.35);
-    solid = csg(solid, brush(g), SUBTRACTION);
-  }
-  const g = solid.geometry.clone();
-  g.rotateX(-Math.PI / 2);
-  g.computeVertexNormals();
-  return { geometry: g, overallW, overallD, overallH };
-}
+function keycapLoft(bw,bd,tw,td,h){const levels=6,sides=32,pos=[],idx=[],rings=[];for(let l=0;l<=levels;l++){const t=l/levels,w=THREE.MathUtils.lerp(bw,tw,t),d=THREE.MathUtils.lerp(bd,td,t),start=pos.length/3;for(let i=0;i<sides;i++){const a=i/sides*Math.PI*2;pos.push(Math.cos(a)*w/2,Math.sin(a)*d/2,t*h)}rings.push(start)}for(let l=0;l<levels;l++)for(let i=0;i<sides;i++){const a=rings[l]+i,b=rings[l]+(i+1)%sides,c=rings[l+1]+(i+1)%sides,d=rings[l+1]+i;idx.push(a,b,c,a,c,d)}const tc=pos.length/3;pos.push(0,0,h);for(let i=0;i<sides;i++)idx.push(rings[levels]+i,rings[levels]+(i+1)%sides,tc);const bc=pos.length/3;pos.push(0,0,0);for(let i=0;i<sides;i++)idx.push(rings[0]+(i+1)%sides,rings[0]+i,bc);const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();return g}
+function buildKeycap(k){let solid=brush(keycapLoft(k.width,k.depth,k.topWidth,k.topDepth,k.height));const inner=keycapLoft(k.width-k.wall*2,k.depth-k.wall*2,k.topWidth-k.wall*2,k.topDepth-k.wall*2,k.height-k.topThickness+.5);inner.translate(0,0,-.4);solid=csg(solid,brush(inner),SUBTRACTION);const socketOuter=new THREE.CylinderGeometry(k.socketOuter/2,k.socketOuter/2,k.socketHeight,28);socketOuter.rotateX(Math.PI/2);socketOuter.translate(0,0,k.socketHeight/2+.2);let socket=brush(socketOuter);const total=k.crossTotal+k.stemTolerance*2,arm=k.crossArm+k.stemTolerance*2,g1=new THREE.BoxGeometry(total,arm,k.socketHeight+1),g2=new THREE.BoxGeometry(arm,total,k.socketHeight+1);g1.translate(0,0,k.socketHeight/2+.2);g2.translate(0,0,k.socketHeight/2+.2);socket=csg(socket,csg(brush(g1),brush(g2),ADDITION),SUBTRACTION);solid=csg(solid,socket,ADDITION);const g=solid.geometry.clone();g.rotateX(-Math.PI/2);g.rotateZ(THREE.MathUtils.degToRad(k.tilt));g.computeVertexNormals();return g}
 
-function Controls({ view }) {
-  const { camera, gl } = useThree();
-  const ref = useRef();
-  useEffect(() => {
-    const c = new ThreeOrbitControls(camera, gl.domElement);
-    c.target.set(0, 2, 0);
-    c.enableDamping = true;
-    ref.current = c;
-    return () => c.dispose();
-  }, [camera, gl]);
-  useEffect(() => {
-    const presets = {
-      Iso: [32, 26, 34], Top: [0, 55, 0.01], Bottom: [0, -55, 0.01], Front: [0, 5, 55], Back: [0, 5, -55], Left: [-55, 5, 0], Right: [55, 5, 0],
-    };
-    const v = presets[view] || presets.Iso;
-    camera.position.set(...v);
-    camera.lookAt(0, 2, 0);
-    ref.current?.update();
-  }, [view, camera]);
-  useFrame(() => ref.current?.update());
-  return null;
-}
-function Model({ geometry, color, wireframe, transparent, modelRef }) {
-  const mat = useMemo(() => new THREE.MeshStandardMaterial({ color, roughness: 0.36, metalness: 0.04, transparent, opacity: transparent ? 0.55 : 1, wireframe, side: THREE.DoubleSide }), [color, wireframe, transparent]);
-  return <mesh ref={modelRef} geometry={geometry} material={mat} />;
-}
-function Scene({ geometry, view, color, wireframe, transparent, modelRef }) {
-  return <>
-    <ambientLight intensity={1.2} />
-    <directionalLight position={[12, 18, 14]} intensity={2.2} />
-    <Model geometry={geometry} color={color} wireframe={wireframe} transparent={transparent} modelRef={modelRef} />
-    <gridHelper args={[180, 180]} />
-    <Controls view={view} />
-  </>;
-}
+function Controls({view,target=[0,2,0]}){const{camera,gl}=useThree(),ref=useRef();useEffect(()=>{const c=new ThreeOrbitControls(camera,gl.domElement);c.enableDamping=true;c.target.set(...target);ref.current=c;return()=>c.dispose()},[camera,gl]);useEffect(()=>{const map={Iso:[46,34,52],Top:[0,70,.01],Bottom:[0,-70,.01],Front:[0,10,70],Back:[0,10,-70],Left:[-70,10,0],Right:[70,10,0]},v=map[view]||map.Iso;camera.position.set(...v);camera.lookAt(...target);ref.current?.update()},[view,camera]);useFrame(()=>ref.current?.update());return null}
+function Scene({geometry,view,color,wire,alpha,modelRef}){const mat=useMemo(()=>new THREE.MeshStandardMaterial({color,roughness:.38,metalness:.03,wireframe:wire,transparent:alpha,opacity:alpha?.56:1,side:THREE.DoubleSide}),[color,wire,alpha]);return<><ambientLight intensity={1.35}/><directionalLight position={[12,18,16]} intensity={2.2}/><mesh ref={modelRef} geometry={geometry} material={mat}/><gridHelper args={[220,220]}/><Controls view={view}/></>}
+const Num=({label,value,onChange,step=.1,suffix='mm',min})=><label className="field"><span>{label}</span><div><input type="number" value={value} min={min} step={step} onChange={e=>onChange(Number(e.target.value))}/><b>{suffix}</b></div></label>;
+const Sel=({label,value,onChange,children})=><label className="field"><span>{label}</span><select value={value} onChange={e=>onChange(e.target.value)}>{children}</select></label>;
+function download(name,data,type){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([data],{type}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),800)}
 
-function NumberField({ label, value, onChange, min, max, step = 0.1, suffix = 'mm' }) {
-  return <label className="field"><span>{label}</span><div><input type="number" value={value} min={min} max={max} step={step} onChange={e => onChange(Number(e.target.value))} /><b>{suffix}</b></div></label>;
+function App(){
+ const modelRef=useRef(),[tool,setTool]=useState('Tray'),[view,setView]=useState('Iso'),[wire,setWire]=useState(false),[alpha,setAlpha]=useState(false),[color,setColor]=useState('#d7e2f2'),[selected,setSelected]=useState(0);
+ const makeCells=(r,c)=>Array.from({length:r*c},()=>({enabled:true,unit:'1U',customW:19.4,customD:19.4,fitOffset:0}));
+ const[tray,setTray]=useState({mode:'Pocket',rows:4,cols:6,pitchX:19.05,pitchY:19.05,edge:3.2,baseThickness:2.8,pocketDepth:7,topLip:1.6,taperDelta:1.0,globalClearance:0,outerRadius:3,fingerNotch:true,notchRadius:3.6,mountPlate:3,pegHeight:3.6,pegTotal:3.95,pegArm:1.05,supportRing:true,ringOuter:7,ringInner:5.4,ringHeight:1.2,cells:makeCells(4,6)});
+ const[key,setKey]=useState({profile:'Cherry',width:18,depth:18,topWidth:13.2,topDepth:13.2,height:9.5,wall:1.2,topThickness:1.6,tilt:-6,socketOuter:5.5,socketHeight:4.2,crossTotal:4.1,crossArm:1.17,stemTolerance:.1});
+ const patchTray=x=>setTray(v=>({...v,...x})),patchKey=x=>setKey(v=>({...v,...x}));
+ const resizeGrid=(rows,cols)=>{const cells=Array.from({length:rows*cols},(_,i)=>tray.cells[i]||{enabled:true,unit:'1U',customW:19.4,customD:19.4,fitOffset:0});patchTray({rows,cols,cells});setSelected(0)};
+ const setCell=(i,x)=>setTray(v=>({...v,cells:v.cells.map((c,idx)=>idx===i?{...c,...x}:c)}));
+ const trayBuilt=useMemo(()=>{try{return buildTray(tray)}catch(e){console.error(e);return{geometry:new THREE.BoxGeometry(1,1,1),W:0,D:0,H:0}}},[tray]);
+ const keyGeom=useMemo(()=>{try{return buildKeycap(key)}catch(e){console.error(e);return new THREE.BoxGeometry(1,1,1)}},[key]);
+ const geometry=tool==='Tray'?trayBuilt.geometry:keyGeom;
+ const exportStl=()=>{if(!modelRef.current)return;modelRef.current.updateMatrixWorld(true);const bin=new STLExporter().parse(modelRef.current,{binary:true});download(tool==='Tray'?'keycap_tray.stl':'keycap.stl',bin,'model/stl')};
+ const exportJson=()=>download('keycap-studio.json',JSON.stringify({tool,tray,key},null,2),'application/json');
+ const applyTrayPreset=(r,c)=>resizeGrid(r,c);
+ const applyFit=name=>{const off=fitPreset[name];patchTray({cells:tray.cells.map(c=>({...c,fitOffset:off}))})};
+ const testStrip=()=>{const cells=[-.15,0,.2].map((f)=>({enabled:true,unit:'1U',customW:19.4,customD:19.4,fitOffset:f}));patchTray({mode:'Pocket',rows:1,cols:3,pitchX:23,edge:4,cells});setSelected(1)};
+ const cell=tray.cells[selected]||tray.cells[0];
+ const warnings=[];if(tool==='Tray'&&tray.mode==='Pocket'&&tray.pocketDepth<5)warnings.push('Pocket depth dưới 5 mm có thể giữ keycap kém.');if(tool==='Tray'&&tray.mode==='Mount'&&tray.pegArm>1.2)warnings.push('Peg arm khá dày, nên in test trước khi cắm keycap.');if(tool==='Tray'&&trayBuilt.W>250)warnings.push('Khay rộng trên 250 mm, hãy kiểm tra kích thước bàn in.');if(tool==='Keycap'&&key.wall<.9)warnings.push('Wall keycap dưới 0.9 mm khá mỏng.');
+ return <div className="app"><header><div className="brand"><div className="logo">K</div><div><h1>Keycap Studio</h1><p>Keycap + Tray Generator / STL thực</p></div></div><div className="modeSwitch"><button className={tool==='Keycap'?'active':''} onClick={()=>setTool('Keycap')}>Keycap</button><button className={tool==='Tray'?'active':''} onClick={()=>setTool('Tray')}>Tray Generator</button></div><div className="actions"><button onClick={exportJson}>JSON</button><button className="primary" onClick={exportStl}>Export STL</button></div></header>
+ <main className="workspace"><aside className="left">
+ {tool==='Tray'?<>
+  <section><div className="sectionTitle"><h3>Tray type</h3><span>{tray.mode}</span></div><div className="seg"><button className={tray.mode==='Pocket'?'active':''} onClick={()=>patchTray({mode:'Pocket'})}>Pocket Tray</button><button className={tray.mode==='Mount'?'active':''} onClick={()=>patchTray({mode:'Mount'})}>MX Mount Tray</button></div><p className="desc">Pocket = nhét keycap vào ô. MX Mount = cắm keycap lên chốt chữ thập đực.</p></section>
+  <section><h3>Layout</h3><div className="chips"><button onClick={()=>applyTrayPreset(3,5)}>3×5</button><button onClick={()=>applyTrayPreset(4,6)}>4×6</button><button onClick={()=>applyTrayPreset(5,7)}>5×7</button><button onClick={()=>applyTrayPreset(6,8)}>6×8</button></div><div className="two"><Num label="Rows" value={tray.rows} min={1} step={1} suffix="" onChange={v=>resizeGrid(Math.max(1,Math.min(10,v)),tray.cols)}/><Num label="Cols" value={tray.cols} min={1} step={1} suffix="" onChange={v=>resizeGrid(tray.rows,Math.max(1,Math.min(14,v)))}/></div><div className="cellGrid" style={{gridTemplateColumns:`repeat(${tray.cols},1fr)`}}>{tray.cells.map((c,i)=><button key={i} className={`${selected===i?'selected':''} ${!c.enabled?'disabled':''}`} onClick={()=>setSelected(i)}>{c.enabled?c.unit:'×'}</button>)}</div></section>
+  <section><div className="sectionTitle"><h3>Selected cell #{selected+1}</h3><label className="miniToggle"><input type="checkbox" checked={cell.enabled} onChange={e=>setCell(selected,{enabled:e.target.checked})}/> enabled</label></div><Sel label="Unit" value={cell.unit} onChange={v=>setCell(selected,{unit:v})}>{[...Object.keys(units),'Custom'].map(u=><option key={u}>{u}</option>)}</Sel>{cell.unit==='Custom'&&<div className="two"><Num label="Custom width" value={cell.customW} onChange={v=>setCell(selected,{customW:v})}/><Num label="Custom depth" value={cell.customD} onChange={v=>setCell(selected,{customD:v})}/></div>}<Num label="Cell fit offset" value={cell.fitOffset} step={.05} onChange={v=>setCell(selected,{fitOffset:v})}/><div className="chips"><button onClick={()=>setCell(selected,{fitOffset:-.15})}>Tight</button><button onClick={()=>setCell(selected,{fitOffset:0})}>Normal</button><button onClick={()=>setCell(selected,{fitOffset:.2})}>Loose</button></div></section>
+  {tray.mode==='Pocket'?<section><h3>Pocket geometry</h3><Num label="Pocket depth" value={tray.pocketDepth} onChange={v=>patchTray({pocketDepth:v})}/><Num label="Base thickness" value={tray.baseThickness} onChange={v=>patchTray({baseThickness:v})}/><Num label="Top lip" value={tray.topLip} onChange={v=>patchTray({topLip:v})}/><Num label="Taper delta" value={tray.taperDelta} onChange={v=>patchTray({taperDelta:v})}/><Num label="Global clearance" value={tray.globalClearance} step={.05} onChange={v=>patchTray({globalClearance:v})}/><label className="toggle"><input type="checkbox" checked={tray.fingerNotch} onChange={e=>patchTray({fingerNotch:e.target.checked})}/>Finger notch</label><button className="wide primary" onClick={testStrip}>Tạo test strip Tight / Normal / Loose</button></section>:<section><h3>MX male peg</h3><Num label="Peg total" value={tray.pegTotal} step={.05} onChange={v=>patchTray({pegTotal:v})}/><Num label="Peg arm" value={tray.pegArm} step={.05} onChange={v=>patchTray({pegArm:v})}/><Num label="Peg height" value={tray.pegHeight} onChange={v=>patchTray({pegHeight:v})}/><Num label="Plate thickness" value={tray.mountPlate} onChange={v=>patchTray({mountPlate:v})}/><label className="toggle"><input type="checkbox" checked={tray.supportRing} onChange={e=>patchTray({supportRing:e.target.checked})}/>Support ring</label></section>}
+  <section><h3>Tray body</h3><Num label="Pitch X" value={tray.pitchX} onChange={v=>patchTray({pitchX:v})}/><Num label="Pitch Y" value={tray.pitchY} onChange={v=>patchTray({pitchY:v})}/><Num label="Edge margin" value={tray.edge} onChange={v=>patchTray({edge:v})}/><Num label="Outer radius" value={tray.outerRadius} onChange={v=>patchTray({outerRadius:v})}/></section>
+ </>:<>
+  <section><h3>Keycap profile</h3><div className="chips">{Object.keys(keyProfiles).map(n=><button key={n} className={key.profile===n?'active':''} onClick={()=>{const q=keyProfiles[n];patchKey({profile:n,height:q.height,topWidth:q.top,topDepth:q.top,tilt:q.tilt})}}>{n}</button>)}</div></section>
+  <section><h3>Shell</h3><Num label="Bottom width" value={key.width} onChange={v=>patchKey({width:v})}/><Num label="Bottom depth" value={key.depth} onChange={v=>patchKey({depth:v})}/><Num label="Top width" value={key.topWidth} onChange={v=>patchKey({topWidth:v})}/><Num label="Top depth" value={key.topDepth} onChange={v=>patchKey({topDepth:v})}/><Num label="Height" value={key.height} onChange={v=>patchKey({height:v})}/><Num label="Wall" value={key.wall} onChange={v=>patchKey({wall:v})}/><Num label="Top thickness" value={key.topThickness} onChange={v=>patchKey({topThickness:v})}/><Num label="Tilt" value={key.tilt} suffix="°" onChange={v=>patchKey({tilt:v})}/></section>
+  <section><h3>Cherry MX socket</h3><Num label="Cross total" value={key.crossTotal} step={.01} onChange={v=>patchKey({crossTotal:v})}/><Num label="Cross arm" value={key.crossArm} step={.01} onChange={v=>patchKey({crossArm:v})}/><Num label="FDM tolerance" value={key.stemTolerance} step={.05} onChange={v=>patchKey({stemTolerance:v})}/><Num label="Socket outer" value={key.socketOuter} onChange={v=>patchKey({socketOuter:v})}/><Num label="Socket height" value={key.socketHeight} onChange={v=>patchKey({socketHeight:v})}/></section>
+ </>}
+ </aside>
+ <div className="viewer"><Canvas camera={{position:[46,34,52],fov:36}}><Scene geometry={geometry} view={view} color={color} wire={wire} alpha={alpha} modelRef={modelRef}/></Canvas><div className="viewerTop"><span className="statusDot"/>Live geometry</div><div className="hint">Drag xoay • Wheel zoom • Grid 1 mm</div></div>
+ <aside className="inspector"><section><h3>View</h3><div className="viewgrid">{['Iso','Top','Bottom','Front','Back','Left','Right'].map(v=><button key={v} className={view===v?'active':''} onClick={()=>setView(v)}>{v}</button>)}</div><label className="toggle"><input type="checkbox" checked={wire} onChange={e=>setWire(e.target.checked)}/>Wireframe</label><label className="toggle"><input type="checkbox" checked={alpha} onChange={e=>setAlpha(e.target.checked)}/>Transparent</label><input className="color" type="color" value={color} onChange={e=>setColor(e.target.value)}/></section>
+ <section><h3>Analysis</h3>{tool==='Tray'?<div className="stats"><span>Width <b>{trayBuilt.W.toFixed(1)} mm</b></span><span>Depth <b>{trayBuilt.D.toFixed(1)} mm</b></span><span>Height <b>{trayBuilt.H.toFixed(1)} mm</b></span><span>Cells <b>{tray.cells.filter(c=>c.enabled).length}</b></span></div>:<div className="stats"><span>Width <b>{key.width.toFixed(1)} mm</b></span><span>Depth <b>{key.depth.toFixed(1)} mm</b></span><span>Height <b>{key.height.toFixed(1)} mm</b></span></div>}{warnings.length?warnings.map((w,i)=><p className="warning" key={i}>{w}</p>):<p className="ok">Thông số hiện tại không có cảnh báo lớn.</p>}</section>
+ {tool==='Tray'&&<section className="tip"><h3>Fit guidance</h3><p><b>Pocket Normal:</b> opening 1U mặc định 19.40 mm, có taper 1.0 mm xuống đáy để dễ nhét/rút.</p><p><b>MX Mount:</b> peg mặc định 3.95 × 1.05 mm. Nên test 3 peg trước khi in cả khay.</p><div className="chips"><button onClick={()=>applyFit('Tight')}>All Tight</button><button onClick={()=>applyFit('Normal')}>All Normal</button><button onClick={()=>applyFit('Loose')}>All Loose</button></div></section>}
+ </aside></main></div>
 }
-function SelectField({ label, value, onChange, children }) {
-  return <label className="field"><span>{label}</span><select value={value} onChange={e => onChange(e.target.value)}>{children}</select></label>;
-}
-function Toggle({ checked, onChange, children }) {
-  return <label className="toggle"><input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />{children}</label>;
-}
-function exportMeshStl(mesh, filename) {
-  if (!mesh) return;
-  mesh.updateMatrixWorld(true);
-  const data = new STLExporter().parse(mesh, { binary: true });
-  const blob = new Blob([data], { type: 'model/stl' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-function downloadJson(data, filename) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-
-function KeycapPanel({ p, setP, legends, setLegends, profile, setProfile, size, setSize, tab, setTab }) {
-  const patch = x => setP(v => ({ ...v, ...x }));
-  const applyProfile = n => { setProfile(n); const q = profiles[n]; patch({ height: q.h, topWidth: q.top, topDepth: q.top, dish: q.dish, tilt: q.tilt }); };
-  const applySize = n => { setSize(n); patch({ width: sizes[n], depth: 18, stabilizers: ['2U', '2.25U', '2.75U', '6.25U'].includes(n), stabSpacing: n === '6.25U' ? 100.5 : 23.8 }); };
-  const addLegend = () => setLegends(v => v.length >= 8 ? v : [...v, { id: crypto.randomUUID(), text: 'Fn', mode: 'Emboss', font: 'Sans', size: 3, depth: 0.5, bevel: 0.04, x: 0, y: 0, rotate: 0 }]);
-  const updateLegend = (id, x) => setLegends(v => v.map(l => l.id === id ? { ...l, ...x } : l));
-  const removeLegend = id => setLegends(v => v.filter(l => l.id !== id));
-  return <>
-    <div className="subtabs">{['Shape', 'Stem', 'Legends', 'Print'].map(x => <button key={x} className={tab === x ? 'active' : ''} onClick={() => setTab(x)}>{x}</button>)}</div>
-    {tab === 'Shape' && <>
-      <section><h3>Size preset</h3><div className="chips">{Object.keys(sizes).map(n => <button key={n} className={size === n ? 'active' : ''} onClick={() => applySize(n)}>{n}</button>)}</div></section>
-      <section><h3>Profile</h3><div className="chips">{Object.keys(profiles).map(n => <button key={n} className={profile === n ? 'active' : ''} onClick={() => applyProfile(n)}>{n}</button>)}</div></section>
-      <section><h3>Body</h3><NumberField label="Bottom W" value={p.width} onChange={v => patch({ width: v })} /><NumberField label="Bottom D" value={p.depth} onChange={v => patch({ depth: v })} /><NumberField label="Top W" value={p.topWidth} onChange={v => patch({ topWidth: v })} /><NumberField label="Top D" value={p.topDepth} onChange={v => patch({ topDepth: v })} /><NumberField label="Height" value={p.height} onChange={v => patch({ height: v })} /><NumberField label="Wall" value={p.wall} onChange={v => patch({ wall: v })} /><NumberField label="Top thickness" value={p.topThickness} onChange={v => patch({ topThickness: v })} /><NumberField label="Corner" value={p.corner} onChange={v => patch({ corner: v })} /><NumberField label="Dish" value={p.dish} onChange={v => patch({ dish: v })} /><NumberField label="Tilt" value={p.tilt} onChange={v => patch({ tilt: v })} suffix="°" /></section>
-    </>}
-    {tab === 'Stem' && <>
-      <section><h3>Cherry MX female socket</h3><Toggle checked={p.stemEnabled} onChange={v => patch({ stemEnabled: v })}>Center socket</Toggle><NumberField label="Cross total" value={p.crossTotal} onChange={v => patch({ crossTotal: v })} step={0.01} /><NumberField label="Cross arm" value={p.crossArm} onChange={v => patch({ crossArm: v })} step={0.01} /><NumberField label="Tolerance" value={p.stemTolerance} onChange={v => patch({ stemTolerance: v })} step={0.01} /><NumberField label="Housing OD" value={p.socketOuter} onChange={v => patch({ socketOuter: v })} /><NumberField label="Housing height" value={p.socketHeight} onChange={v => patch({ socketHeight: v })} /><NumberField label="Base Z" value={p.socketBaseZ} onChange={v => patch({ socketBaseZ: v })} /></section>
-      <section><h3>Stabilizer</h3><Toggle checked={p.stabilizers} onChange={v => patch({ stabilizers: v })}>2 stabilizer sockets</Toggle><NumberField label="Spacing C-C" value={p.stabSpacing} onChange={v => patch({ stabSpacing: v })} /><div className="chips"><button onClick={() => patch({ stabSpacing: 23.8 })}>2U 23.8</button><button onClick={() => patch({ stabSpacing: 100.5 })}>6.25U 100.5</button></div></section>
-    </>}
-    {tab === 'Legends' && <section><div className="sectionHead"><h3>Legends ({legends.length}/8)</h3><button onClick={addLegend}>+ Add</button></div>{legends.map((l, i) => <div className="legendCard" key={l.id}><div className="legendTitle"><b>Legend {i + 1}</b><button className="danger" onClick={() => removeLegend(l.id)}>×</button></div><label className="field"><span>Text</span><input className="textinput" value={l.text} onChange={e => updateLegend(l.id, { text: e.target.value })} /></label><SelectField label="Mode" value={l.mode} onChange={v => updateLegend(l.id, { mode: v })}><option>Emboss</option><option>Deboss</option><option>Off</option></SelectField><SelectField label="Font" value={l.font} onChange={v => updateLegend(l.id, { font: v })}>{Object.keys(fontUrls).map(f => <option key={f}>{f}</option>)}</SelectField><NumberField label="Size" value={l.size} onChange={v => updateLegend(l.id, { size: v })} /><NumberField label="Depth" value={l.depth} onChange={v => updateLegend(l.id, { depth: v })} /><NumberField label="Bevel" value={l.bevel} onChange={v => updateLegend(l.id, { bevel: v })} step={0.01} /><div className="twoCols"><NumberField label="X" value={l.x} onChange={v => updateLegend(l.id, { x: v })} /><NumberField label="Y" value={l.y} onChange={v => updateLegend(l.id, { y: v })} /></div><NumberField label="Rotate" value={l.rotate} onChange={v => updateLegend(l.id, { rotate: v })} suffix="°" /></div>)}</section>}
-    {tab === 'Print' && <section><h3>FDM presets</h3><div className="chips"><button onClick={() => patch({ stemTolerance: 0.05, wall: 0.8, topThickness: 1.2 })}>0.2 nozzle</button><button onClick={() => patch({ stemTolerance: 0.10, wall: 1.2, topThickness: 1.6 })}>0.4 nozzle</button><button onClick={() => patch({ stemTolerance: 0.15, wall: 1.8, topThickness: 2.0 })}>0.6 nozzle</button></div><p className="note">Stem tolerance vẫn nên test theo máy và vật liệu thực tế.</p></section>}
-  </>;
-}
-
-function TrayPanel({ t, setT }) {
-  const patch = x => setT(v => ({ ...v, ...x }));
-  const resizeGrid = (rows, cols) => setT(v => { const cells = Array(rows * cols).fill(true); for (let r = 0; r < Math.min(rows, v.rows); r++) for (let c = 0; c < Math.min(cols, v.cols); c++) cells[r * cols + c] = v.cells[r * v.cols + c] ?? true; return { ...v, rows, cols, cells }; });
-  const toggleCell = idx => setT(v => ({ ...v, cells: v.cells.map((x, i) => i === idx ? !x : x) }));
-  const setAll = value => patch({ cells: Array(t.rows * t.cols).fill(value) });
-  return <>
-    <section><h3>Grid / layout</h3><div className="twoCols"><NumberField label="Rows" value={t.rows} min={1} max={12} step={1} onChange={v => resizeGrid(Math.max(1, Math.min(12, Math.round(v))), t.cols)} suffix="" /><NumberField label="Columns" value={t.cols} min={1} max={18} step={1} onChange={v => resizeGrid(t.rows, Math.max(1, Math.min(18, Math.round(v))))} suffix="" /></div><div className="chips"><button onClick={() => resizeGrid(4, 6)}>4×6</button><button onClick={() => resizeGrid(5, 7)}>5×7</button><button onClick={() => resizeGrid(6, 8)}>6×8</button><button onClick={() => resizeGrid(6, 12)}>6×12</button></div></section>
-    <section><div className="sectionHead"><h3>Active pockets</h3><div><button onClick={() => setAll(true)}>All</button><button onClick={() => setAll(false)}>None</button></div></div><div className="cellGrid" style={{ gridTemplateColumns: `repeat(${t.cols}, 1fr)` }}>{t.cells.map((on, idx) => <button key={idx} className={on ? 'cell on' : 'cell'} onClick={() => toggleCell(idx)} title={`R${Math.floor(idx / t.cols) + 1} C${idx % t.cols + 1}`}>{on ? '✓' : ''}</button>)}</div><p className="note">Tắt từng ô để tạo khay theo layout riêng.</p></section>
-    <section><h3>Pocket</h3><NumberField label="Slot width" value={t.slotWidth} onChange={v => patch({ slotWidth: v })} /><NumberField label="Slot depth" value={t.slotDepth} onChange={v => patch({ slotDepth: v })} /><NumberField label="Clearance" value={t.clearance} onChange={v => patch({ clearance: v })} step={0.05} /><NumberField label="Pocket depth" value={t.pocketDepth} onChange={v => patch({ pocketDepth: v })} /><NumberField label="Slot radius" value={t.slotRadius} onChange={v => patch({ slotRadius: v })} /></section>
-    <section><h3>Spacing</h3><NumberField label="Pitch X" value={t.pitchX} onChange={v => patch({ pitchX: v })} step={0.05} /><NumberField label="Pitch Y" value={t.pitchY} onChange={v => patch({ pitchY: v })} step={0.05} /><button className="wideBtn" onClick={() => patch({ pitchX: 19.05, pitchY: 19.05 })}>Reset 19.05 mm</button></section>
-    <section><h3>Tray body</h3><NumberField label="Edge margin" value={t.edge} onChange={v => patch({ edge: v })} /><NumberField label="Base thickness" value={t.baseThickness} onChange={v => patch({ baseThickness: v })} /><NumberField label="Top lip" value={t.topLip} onChange={v => patch({ topLip: v })} /><NumberField label="Outer radius" value={t.outerRadius} onChange={v => patch({ outerRadius: v })} /><Toggle checked={t.fingerNotch} onChange={v => patch({ fingerNotch: v })}>Finger notch</Toggle>{t.fingerNotch && <><NumberField label="Notch radius" value={t.notchRadius} onChange={v => patch({ notchRadius: v })} /><NumberField label="Notch depth" value={t.notchDepth} onChange={v => patch({ notchDepth: v })} /></>}<Toggle checked={t.wallCutout} onChange={v => patch({ wallCutout: v })}>Lightweight underside recess</Toggle></section>
-    <section><h3>Quick presets</h3><div className="chips"><button onClick={() => patch({ slotWidth: 18.2, slotDepth: 18.2, clearance: 0.3, pocketDepth: 5.5, pitchX: 19.05, pitchY: 19.05 })}>1U loose</button><button onClick={() => patch({ slotWidth: 18.0, slotDepth: 18.0, clearance: 0.15, pocketDepth: 4.5, pitchX: 19.05, pitchY: 19.05 })}>1U snug</button><button onClick={() => patch({ baseThickness: 1.8, edge: 2.5, topLip: 0.8 })}>Light</button><button onClick={() => patch({ baseThickness: 3.0, edge: 4.0, topLip: 1.5 })}>Strong</button></div></section>
-  </>;
-}
-
-function App() {
-  const modelRef = useRef();
-  const [mode, setMode] = useState('Keycap');
-  const [view, setView] = useState('Iso');
-  const [wireframe, setWireframe] = useState(false);
-  const [transparent, setTransparent] = useState(false);
-  const [color, setColor] = useState('#d9e3f1');
-  const [profile, setProfile] = useState('Cherry');
-  const [size, setSize] = useState('1U');
-  const [tab, setTab] = useState('Shape');
-  const [fonts, setFonts] = useState({});
-  const [p, setP] = useState({ width: 18, depth: 18, topWidth: 13.2, topDepth: 13.2, height: 9.5, wall: 1.2, topThickness: 1.6, corner: 1.7, dish: 0.65, tilt: -6, stemEnabled: true, crossTotal: 4.10, crossArm: 1.17, stemTolerance: 0.10, socketOuter: 5.6, socketHeight: 4.2, socketBaseZ: 0.7, stabilizers: false, stabSpacing: 23.8 });
-  const [legends, setLegends] = useState([{ id: crypto.randomUUID(), text: 'A', mode: 'Emboss', font: 'Sans', size: 4.2, depth: 0.55, bevel: 0.05, x: 0, y: 0, rotate: 0 }]);
-  const [t, setT] = useState({ rows: 4, cols: 6, cells: Array(24).fill(true), slotWidth: 18.2, slotDepth: 18.2, clearance: 0.30, pocketDepth: 5.5, slotRadius: 1.8, pitchX: 19.05, pitchY: 19.05, edge: 3.0, baseThickness: 2.2, topLip: 1.0, outerRadius: 3.0, fingerNotch: false, notchRadius: 3.0, notchDepth: 2.0, wallCutout: false });
-
-  useEffect(() => {
-    let dead = false;
-    Promise.all(Object.entries(fontUrls).map(async ([name, url]) => {
-      try { const r = await fetch(url); const j = await r.json(); return [name, new FontLoader().parse(j)]; } catch { return [name, null]; }
-    })).then(entries => { if (!dead) setFonts(Object.fromEntries(entries.filter(([, f]) => f))); });
-    return () => { dead = true; };
-  }, []);
-
-  const keycapGeometry = useMemo(() => { try { return buildKeycapGeometry(p, legends, fonts); } catch (e) { console.error('keycap CSG', e); return new THREE.BoxGeometry(1, 1, 1); } }, [p, legends, fonts]);
-  const trayData = useMemo(() => { try { return buildTrayGeometry(t); } catch (e) { console.error('tray CSG', e); return { geometry: new THREE.BoxGeometry(1, 1, 1), overallW: 1, overallD: 1, overallH: 1 }; } }, [t]);
-  const geometry = mode === 'Keycap' ? keycapGeometry : trayData.geometry;
-  const bounds = useMemo(() => { geometry.computeBoundingBox(); const b = geometry.boundingBox; return b ? new THREE.Vector3().subVectors(b.max, b.min) : new THREE.Vector3(); }, [geometry]);
-  const activePockets = t.cells.filter(Boolean).length;
-
-  const exportJson = () => downloadJson({ version: 4, mode, keycap: { p, legends, profile, size }, tray: t }, `keycap-studio-${mode.toLowerCase()}.json`);
-  const importJson = e => { const f = e.target.files?.[0]; if (!f) return; f.text().then(text => { try { const q = JSON.parse(text); if (q.mode) setMode(q.mode); if (q.keycap) { if (q.keycap.p) setP(q.keycap.p); if (q.keycap.legends) setLegends(q.keycap.legends); if (q.keycap.profile) setProfile(q.keycap.profile); if (q.keycap.size) setSize(q.keycap.size); } if (q.tray) setT(q.tray); } catch { alert('JSON không hợp lệ'); } }); e.target.value = ''; };
-  const exportStl = () => exportMeshStl(modelRef.current, mode === 'Keycap' ? `keycap_${size}_${profile}.stl` : `keycap_tray_${t.rows}x${t.cols}_${activePockets}slots.stl`);
-
-  return <div className="app darkApp">
-    <header className="studioHeader"><div><h1>Keycap Studio</h1><p>Keycap + Tray Generator • STL ready</p></div><div className="modeSwitch"><button className={mode === 'Keycap' ? 'active' : ''} onClick={() => setMode('Keycap')}>Keycap</button><button className={mode === 'Tray' ? 'active' : ''} onClick={() => setMode('Tray')}>Tray Generator</button></div><div className="actions"><label className="filebtn">Import<input type="file" accept="application/json" onChange={importJson} /></label><button onClick={exportJson}>JSON</button><button className="primary" onClick={exportStl}>Export STL</button></div></header>
-    <main className="studioMain">
-      <aside className="leftPanel">{mode === 'Keycap' ? <KeycapPanel p={p} setP={setP} legends={legends} setLegends={setLegends} profile={profile} setProfile={setProfile} size={size} setSize={setSize} tab={tab} setTab={setTab} /> : <TrayPanel t={t} setT={setT} />}</aside>
-      <div className="viewer studioViewer"><Canvas camera={{ position: [32, 26, 34], fov: 36 }}><Scene geometry={geometry} view={view} color={color} wireframe={wireframe} transparent={transparent} modelRef={modelRef} /></Canvas><div className="hint">Drag rotate • Wheel zoom • Grid 1 mm</div></div>
-      <aside className="right inspector"><section><h3>{mode === 'Keycap' ? 'Keycap Inspector' : 'Tray Inspector'}</h3>{mode === 'Keycap' ? <div className="stats"><span>Size <b>{size}</b></span><span>Profile <b>{profile}</b></span><span>Legends <b>{legends.length}</b></span><span>Stem <b>{p.stemEnabled ? 'MX female' : 'Off'}</b></span></div> : <div className="stats"><span>Grid <b>{t.rows} × {t.cols}</b></span><span>Pockets <b>{activePockets}</b></span><span>Overall W <b>{trayData.overallW.toFixed(2)} mm</b></span><span>Overall D <b>{trayData.overallD.toFixed(2)} mm</b></span><span>Overall H <b>{trayData.overallH.toFixed(2)} mm</b></span></div>}<hr/><div className="stats"><span>Mesh X <b>{bounds.x.toFixed(2)} mm</b></span><span>Mesh Y <b>{bounds.y.toFixed(2)} mm</b></span><span>Mesh Z <b>{bounds.z.toFixed(2)} mm</b></span></div></section><section><h3>View</h3><div className="viewGrid">{['Iso','Top','Bottom','Front','Back','Left','Right'].map(v => <button key={v} className={view === v ? 'active' : ''} onClick={() => setView(v)}>{v}</button>)}</div><Toggle checked={wireframe} onChange={setWireframe}>Wireframe</Toggle><Toggle checked={transparent} onChange={setTransparent}>Transparent</Toggle><label className="colorRow">Model color <input type="color" value={color} onChange={e => setColor(e.target.value)} /></label></section>{mode === 'Tray' && <section><h3>Tray notes</h3><p className="note">Pocket size = slot + 2×clearance. Pitch mặc định 19.05 mm. Bạn có thể tắt từng pocket để tạo layout tùy ý.</p><p className="note">Nếu khay quá lớn so với bàn in, giảm hàng/cột hoặc tách thành nhiều khay.</p></section>}</aside>
-    </main>
-  </div>;
-}
-
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(<App/>);
