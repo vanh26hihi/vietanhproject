@@ -1,11 +1,11 @@
 {
   "name": "keycap-studio-lovable-base",
   "private": true,
-  "version": "2.2.0",
+  "version": "2.3.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/fix-tray-center.mjs && vite",
-    "build": "node scripts/fix-tray-center.mjs && vite build",
+    "dev": "node scripts/fix-tray-center.mjs && node scripts/fix-keycap-font.mjs && vite",
+    "build": "node scripts/fix-tray-center.mjs && node scripts/fix-keycap-font.mjs && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
