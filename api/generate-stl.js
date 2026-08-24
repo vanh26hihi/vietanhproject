@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { Brush, Evaluator, ADDITION, SUBTRACTION } from 'three-bvh-csg';
 
-export const config = { maxDuration: 10 };
+export const config = { maxDuration: 60 };
 
 const boole = new Evaluator();
 boole.attributes = ['position', 'normal'];
@@ -71,6 +71,12 @@ function buildKeycap(k){
   const g=solid.geometry.clone(); g.rotateX(-Math.PI/2); g.rotateZ(THREE.MathUtils.degToRad(p.tilt)); g.computeVertexNormals(); return g;
 }
 
+function toBuffer(view){
+  if(view instanceof ArrayBuffer) return Buffer.from(view);
+  if(ArrayBuffer.isView(view)) return Buffer.from(view.buffer,view.byteOffset,view.byteLength);
+  return Buffer.from(view);
+}
+
 export default async function handler(req,res){
   if(req.method!=='POST') return res.status(405).json({error:'Chỉ hỗ trợ POST'});
   try{
@@ -78,9 +84,10 @@ export default async function handler(req,res){
     const geometry=tool==='Khay'?taoKhay(tray):buildKeycap(key);
     const mesh=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial()); mesh.updateMatrixWorld(true);
     const stl=new STLExporter().parse(mesh,{binary:true});
-    const buf=Buffer.from(stl);
+    const buf=toBuffer(stl);
     res.setHeader('Content-Type','model/stl');
     res.setHeader('Content-Disposition',`attachment; filename="${tool==='Khay'?'khay-keycap':'keycap'}.stl"`);
+    res.setHeader('Content-Length',String(buf.length));
     res.status(200).send(buf);
   }catch(e){
     console.error(e);
