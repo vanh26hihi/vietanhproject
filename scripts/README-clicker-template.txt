@@ -1,0 +1,1 @@
+Binary template expected at public/templates/Compact_Fidget_Clicker_-_Base.stl. Added from user-provided STL; do not replace with approximated geometry.
