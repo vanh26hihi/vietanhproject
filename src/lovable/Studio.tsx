@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useEffect, useState } from "react";
 import { Box, Grid3X3, LayoutGrid, Wrench } from "lucide-react";
 
 const Keycap = lazy(() => import("./App"));
-const Tray = lazy(() => import("./Tray"));
+const Tray = lazy(() => import("./TrayV2"));
 const Layout = lazy(() => import("./Layout"));
 const Editor = lazy(() => import("./Editor"));
 type Tool = "keycap" | "tray" | "layout" | "editor";
