@@ -26,24 +26,24 @@
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(0.985 0.004 240);
-  --foreground: oklch(0.22 0.03 250);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.55 0.13 245);
-  --primary-foreground: oklch(0.99 0.005 240);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.55 0.13 245);
+  --radius: 0.45rem;
+  --background: oklch(0.972 0.004 255);
+  --foreground: oklch(0.20 0.025 255);
+  --card: oklch(0.996 0.002 250);
+  --card-foreground: oklch(0.20 0.025 255);
+  --primary: oklch(0.54 0.145 252);
+  --primary-foreground: oklch(0.99 0.002 250);
+  --secondary: oklch(0.945 0.008 250);
+  --secondary-foreground: oklch(0.24 0.03 255);
+  --muted: oklch(0.952 0.006 252);
+  --muted-foreground: oklch(0.50 0.03 255);
+  --accent: oklch(0.925 0.025 250);
+  --accent-foreground: oklch(0.23 0.035 255);
+  --destructive: oklch(0.58 0.22 28);
+  --destructive-foreground: oklch(0.99 0.002 250);
+  --border: oklch(0.885 0.012 252);
+  --input: oklch(0.885 0.012 252);
+  --ring: oklch(0.54 0.145 252);
 }
 
 @layer base {
@@ -52,8 +52,58 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: ui-sans-serif, "Inter var", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     font-feature-settings: "cv02", "tnum";
   }
   button, input, select { font: inherit; }
+  button { cursor: pointer; }
+  ::selection { background: color-mix(in oklab, var(--primary) 22%, transparent); }
+}
+
+.studio-shell { position: relative; }
+.studio-topbar {
+  position: absolute; inset: 0 0 auto 0; height: 54px; z-index: 200;
+  display: grid; grid-template-columns: 260px minmax(0,1fr) auto; align-items: center; gap: 18px;
+  padding: 0 14px 0 12px; border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--card) 96%, transparent); backdrop-filter: blur(14px);
+  box-shadow: 0 1px 0 rgb(15 23 42 / 0.03);
+}
+.brand-mark { display:grid; place-items:center; width:30px; height:30px; border:1px solid var(--border); background:var(--foreground); color:white; border-radius:7px; }
+.brand-name { font-size:11px; line-height:1; font-weight:800; letter-spacing:.12em; }
+.build-badge { padding:2px 5px; border:1px solid color-mix(in oklab,var(--primary) 25%,var(--border)); background:color-mix(in oklab,var(--primary) 7%,white); color:var(--primary); border-radius:4px; font-size:8px; font-weight:800; letter-spacing:.06em; }
+.topbar-context { min-width:0; display:flex; align-items:center; gap:9px; }
+.context-kicker { font-size:8px; font-weight:800; letter-spacing:.14em; color:var(--muted-foreground); }
+.context-title { white-space:nowrap; font-size:12px; font-weight:700; }
+.context-separator { width:1px; height:18px; background:var(--border); }
+.context-description { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:10px; color:var(--muted-foreground); }
+.status-chip,.unit-chip { height:26px; display:flex; align-items:center; gap:5px; border:1px solid var(--border); background:var(--card); padding:0 8px; border-radius:5px; }
+.unit-chip { font-weight:800; color:var(--foreground); text-transform:uppercase; }
+
+.studio-rail {
+  position:absolute; left:0; top:54px; bottom:0; width:68px; z-index:150;
+  display:flex; flex-direction:column; justify-content:space-between; border-right:1px solid var(--border); background:var(--card);
+}
+.rail-tools { padding:8px 6px; display:flex; flex-direction:column; gap:4px; }
+.rail-tool { position:relative; min-height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; border:1px solid transparent; border-radius:6px; color:var(--muted-foreground); background:transparent; font-size:9px; font-weight:650; }
+.rail-tool:hover { background:var(--muted); color:var(--foreground); }
+.rail-tool.is-active { border-color:color-mix(in oklab,var(--primary) 18%,var(--border)); background:color-mix(in oklab,var(--primary) 7%,white); color:var(--primary); }
+.rail-tool.is-active::before { content:""; position:absolute; left:-6px; width:3px; height:24px; background:var(--primary); border-radius:0 3px 3px 0; }
+.rail-footer { height:46px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; border-top:1px solid var(--border); font-size:8px; font-weight:800; color:var(--muted-foreground); }
+
+.studio-workspace { position:absolute; left:68px; right:0; top:54px; bottom:0; min-width:0; min-height:0; overflow:hidden; background:var(--background); }
+.studio-workspace > * { height:100%; }
+.studio-workspace aside { padding-top: 12px !important; }
+.studio-workspace main[class*="pt-12"] { padding-top: 0 !important; }
+.studio-workspace main [class*="top-14"] { top: 10px !important; }
+.studio-workspace section { box-shadow: 0 1px 1px rgb(15 23 42 / .025); }
+.studio-workspace input[type="number"], .studio-workspace input[type="text"], .studio-workspace select { outline:none; }
+.studio-workspace input:focus, .studio-workspace select:focus { border-color:color-mix(in oklab,var(--primary) 50%,var(--border)); box-shadow:0 0 0 2px color-mix(in oklab,var(--primary) 10%,transparent); }
+.loading-card { display:flex; align-items:center; gap:8px; border:1px solid var(--border); background:var(--card); padding:10px 13px; border-radius:6px; font-size:11px; color:var(--muted-foreground); box-shadow:0 8px 24px rgb(15 23 42 / .06); }
+.loading-dot { width:7px; height:7px; border-radius:50%; background:var(--primary); animation:pulse 1s ease-in-out infinite alternate; }
+@keyframes pulse { from{opacity:.35;transform:scale(.85)} to{opacity:1;transform:scale(1)} }
+
+@media (max-width: 1050px) {
+  .studio-topbar { grid-template-columns:220px 1fr auto; }
+  .context-description { display:none; }
+  .status-chip:nth-of-type(2) { display:none; }
 }
