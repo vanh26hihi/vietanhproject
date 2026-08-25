@@ -66,7 +66,7 @@ export const DEFAULT_PARAMS: KeycapParams = {
   bottomWidth: 18, bottomDepth: 18, topWidth: 14, topDepth: 14, height: 9.0,
   wallThickness: 1.2, topThickness: 1.6, sideDraft: 3, cornerRadius: 1.6, topCornerRadius: 1.8,
   dishDepth: 0, dishStrength: 1.6, topTilt: 0, filletTop: 0.4,
-  stemEnabled: true, stemDiameter: 5.5, stemHeight: 4.7, crossLength: 4.1, crossWidth: 1.35, stemClearance: 0.1,
+  stemEnabled: true, stemDiameter: 5.5, stemHeight: 5.2, crossLength: 4.1, crossWidth: 1.35, stemClearance: 0.1,
   stabEnabled: false, stabSpacing: 23.8,
   xyCompensation: 0, zCompensation: 0, shrinkage: 0, nozzle: 0.4,
 };
