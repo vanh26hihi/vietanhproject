@@ -1,11 +1,11 @@
 {
   "name": "keycap-studio-lovable-base",
   "private": true,
-  "version": "2.5.0",
+  "version": "2.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/patch-rounded-fonts.mjs && vite build",
+    "build": "node scripts/patch-rounded-fonts.mjs && node scripts/patch-icon-library.mjs && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
