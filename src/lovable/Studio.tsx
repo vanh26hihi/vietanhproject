@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Box, Grid3X3, LayoutGrid, Wrench, Cuboid, CircleDot, Layers3, ScanLine } from "lucide-react";
 
-const Keycap = lazy(() => import("./KeycapAdvancedV4"));
+const Keycap = lazy(() => import("./KeycapAdvancedV5"));
 const Tray = lazy(() => import("./ClickerTray"));
 const Layout = lazy(() => import("./Layout"));
 const Editor = lazy(() => import("./Editor"));
@@ -9,7 +9,7 @@ type Tool = "keycap" | "tray" | "layout" | "editor";
 
 type Meta = {label:string;short:string;description:string;icon:React.ComponentType<{className?:string}>};
 const META:Record<Tool,Meta>={
-  keycap:{label:"Keycap Designer",short:"Keycap",description:"Tạo vỏ, stem và legend parametric",icon:Box},
+  keycap:{label:"Keycap Designer",short:"Keycap",description:"Tạo nhiều keycap, stem, chữ và icon",icon:Box},
   tray:{label:"Clicker Holder",short:"Clicker",description:"Thiết kế khay / holder cho MX switch",icon:Grid3X3},
   layout:{label:"Layout Builder",short:"Layout",description:"Bố trí nhiều keycap và switch plate",icon:LayoutGrid},
   editor:{label:"Mesh Editor",short:"Mesh",description:"Import, tách và chỉnh sửa STL / OBJ / 3MF",icon:Wrench},
@@ -33,7 +33,7 @@ export default function Studio(){
       <div className="flex min-w-0 items-center gap-3">
         <div className="brand-mark"><Cuboid className="size-4"/></div>
         <div className="min-w-0">
-          <div className="flex items-center gap-2"><span className="brand-name">KEYCAP STUDIO</span><span className="build-badge">BETA</span></div>
+          <div className="flex items-center gap-2"><span className="brand-name">KEYCAP STUDIO</span><span className="build-badge">V5</span></div>
           <div className="truncate text-[10px] text-muted-foreground">Parametric keycap & MX switch workspace</div>
         </div>
       </div>
@@ -49,22 +49,7 @@ export default function Studio(){
         <span className="unit-chip">mm</span>
       </div>
     </header>
-
-    <aside className="studio-rail" aria-label="Công cụ">
-      <div className="rail-tools">
-        {(Object.keys(META) as Tool[]).map(id=>{const m=META[id],Icon=m.icon;return <button key={id} onClick={()=>go(id)} className={`rail-tool ${tool===id?"is-active":""}`} title={m.label}>
-          <Icon className="size-[18px]"/><span>{m.short}</span>
-        </button>})}
-      </div>
-      <div className="rail-footer"><Layers3 className="size-4"/><span>3D</span></div>
-    </aside>
-
-    <main className="studio-workspace">
-      <Boundary name={tool}>
-        <Suspense fallback={<div className="grid h-full place-items-center bg-background"><div className="loading-card"><span className="loading-dot"/><span>Đang tải {meta.label}…</span></div></div>}>
-          {tool==="keycap"?<Keycap/>:tool==="tray"?<Tray/>:tool==="layout"?<Layout/>:<Editor/>}
-        </Suspense>
-      </Boundary>
-    </main>
+    <aside className="studio-rail" aria-label="Công cụ"><div className="rail-tools">{(Object.keys(META) as Tool[]).map(id=>{const m=META[id],Icon=m.icon;return <button key={id} onClick={()=>go(id)} className={`rail-tool ${tool===id?"is-active":""}`} title={m.label}><Icon className="size-[18px]"/><span>{m.short}</span></button>})}</div><div className="rail-footer"><Layers3 className="size-4"/><span>3D</span></div></aside>
+    <main className="studio-workspace"><Boundary name={tool}><Suspense fallback={<div className="grid h-full place-items-center bg-background"><div className="loading-card"><span className="loading-dot"/><span>Đang tải {meta.label}…</span></div></div>}>{tool==="keycap"?<Keycap/>:tool==="tray"?<Tray/>:tool==="layout"?<Layout/>:<Editor/>}</Suspense></Boundary></main>
   </div>
 }
