@@ -1,11 +1,11 @@
 {
   "name": "keycap-studio-lovable-base",
   "private": true,
-  "version": "3.0.0",
+  "version": "3.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/patch-v6-production.mjs && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
