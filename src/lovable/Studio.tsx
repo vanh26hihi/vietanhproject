@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Box, Grid3X3, LayoutGrid, Wrench, Cuboid, CircleDot, Layers3, ScanLine } from "lucide-react";
 
-const Keycap = lazy(() => import("./KeycapAdvancedV5"));
+const Keycap = lazy(() => import("./KeycapAdvancedV5b"));
 const Tray = lazy(() => import("./ClickerTray"));
 const Layout = lazy(() => import("./Layout"));
 const Editor = lazy(() => import("./Editor"));
